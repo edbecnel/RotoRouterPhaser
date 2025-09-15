@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>RotoRouter — Vertical Slice (Rotation Hints Visible On All Cells)</title>
+  <title>RotoRouter — Vertical Slice (Full Build)</title>
   <style>
     html, body { height: 100%; margin: 0; font-family: system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif; background: #0f1115; color: #e6e6e6; }
     .app { display: grid; grid-template-columns: 360px 1fr; height: 100%; }
@@ -73,7 +73,7 @@
           <span id="tokenTag" class="tag">Token: Ready</span>
           <span id="tokenCount" class="tag">Tokens: 0/3</span>
         </div>
-        <div class="row small muted">Click a token to move along <b>connected pipes</b>, or click your <b>corner</b> (if open) to place a new token. One token action/turn. Max 3 tokens/player.</div>
+        <div class="row small muted">Move along <b>any connected pipes</b> (opponent tracks allowed once networks connect). One token action/turn. Max 3 tokens/player.</div>
         <label class="toggle"><input type="checkbox" id="vizEdges"> Show connection edges</label>
         <hr style="border-color:#1f2636"/>
         <div class="row"><b>Rotation</b></div>
@@ -83,7 +83,7 @@
           <button class="btn" id="applyBtn" disabled>Apply</button>
           <span id="rollTag" class="tag">Roll: Ready</span>
         </div>
-        <div class="row small muted">Meshed gears: center rotates ±, neighbors alternate opposite across the grid. One roll per turn.</div>
+        <div class="row small muted">Meshed gears: neighbors alternate opposite direction. One roll per turn.</div>
         <hr style="border-color:#1f2636"/>
         <div class="row"><button class="btn" id="endTurnBtn">End Turn</button></div>
       </div>
@@ -194,7 +194,7 @@
     return arr;
   }
 
-  // BFS for token moves — iterate over actual openings
+  // BFS for token moves — move across ANY connected owner
   function reachableFrom(start){
     const vis=new Set(); const q=[start]; const out=[];
     const key=(x,y)=>x+','+y; vis.add(key(start.x,start.y));
@@ -206,6 +206,7 @@
         const nx=x+dx, ny=y+dy; if(!within(nx,ny)) continue;
         const there=state.board[ny][nx];
         if(!there.track || there.track==='Block') continue;
+        // Allow moving onto any owner's track; only block if a token is present
         if(there.token!=null) continue;
         if(!hasReciprocal(here, there, dx, dy)) continue;
         const k=key(nx,ny); if(!vis.has(k)){ vis.add(k); q.push({x:nx,y:ny}); out.push({x:nx,y:ny}); }
@@ -225,7 +226,6 @@
   }
 
   function startTurn(){
-    // Reset flags for incoming player & refresh HUD
     const P=currentPlayer();
     P.drawLocked=false; P.drawUsed=false; P.tokenUsed=false; P.rollUsed=false;
     state.phase='idle'; state.subphase=null; state.highlight=[]; state.hover=null; state.previewRot=0; state.die=null; state.tokenSelect=null;
@@ -303,11 +303,11 @@
       endTurn();
       return;
     }
-    setStatus('Token: click a token to move OR click your corner to place a new token.');
+    setStatus('Token: click a token to move OR click your corner to place a new token (may traverse opponents via connected pipes).');
     updateHUD();
   }
 
-  // Rotation: meshed gears + hints (direction-correct)
+  // Rotation: meshed gears + hints (direction-correct; visible on all cells)
   function rollDie(){
     const P=currentPlayer();
     if(P.rollUsed){ setStatus('You have already rolled this turn.'); return; }
@@ -341,8 +341,11 @@
   // Auto-advance heuristic
   function maybeAutoAdvance(){
     const P=currentPlayer();
+    // If you haven't drawn & aren't locked & don't hold a card, still possible to draw — do not advance
     if(!P.drawUsed && !P.drawLocked && !P.drawn) return;
+    // If you're holding a card, you still have work — do not advance
     if(P.drawn) return;
+    // If token action still available and any option exists, do not advance
     if(!P.tokenUsed){
       const myTokens = allTokensOf(P.id);
       const corner = cornerFor(P.id);
@@ -357,6 +360,7 @@
       }
       if(hasOption) return;
     }
+    // If roll not used yet, still an action — do not advance
     if(!P.rollUsed) return;
     setStatus('No actions remaining. Auto-advancing turn…');
     endTurn();
@@ -407,7 +411,7 @@
             return;
           }
           state.tokenSelect = from; state.highlight = moves; state.subphase='target';
-          setStatus('Token: choose a connected destination (pipe rules).'); render(); return;
+          setStatus('Token: choose a connected destination (pipes may traverse opponents).'); render(); return;
         }
         const corner = cornerFor(P.id);
         if(corner.x===x && corner.y===y){
@@ -476,19 +480,29 @@
     ctx.fillStyle=COLORS.bg; ctx.fillRect(0,0,canvas.width,canvas.height);
     ctx.save(); ctx.translate(pad,pad);
     const size=cell*N;
+    // grid
     ctx.strokeStyle=COLORS.grid; ctx.lineWidth=1;
     ctx.strokeRect(0,0,size,size);
     for(let i=1;i<N;i++){ ctx.beginPath(); ctx.moveTo(i*cell,0); ctx.lineTo(i*cell,size); ctx.stroke(); ctx.beginPath(); ctx.moveTo(0,i*cell); ctx.lineTo(size,i*cell); ctx.stroke(); }
+    // gears (background)
     for(let y=0;y<N;y++) for(let x=0;x<N;x++){ drawGear(x,y); }
+    // tracks
     for(let y=0;y<N;y++) for(let x=0;x<N;x++){ const c=state.board[y][x]; if(c.track) drawTrack(c.track, c.rot, x,y,1); }
+    // tokens
     for(let y=0;y<N;y++) for(let x=0;x<N;x++){ const c=state.board[y][x]; if(c.token!=null) drawToken(c.token,x,y); }
+    // connection edges
     if(UI.vizEdges().checked){ drawEdges(); }
+    // rotation hints
     if(state.die && state.die!=='X'){ drawRotationHints(); }
+    // center marker
     const cc=Math.floor(N/2); const cx=cc*cell+cell/2, cy=cc*cell+cell/2;
     ctx.strokeStyle=COLORS.hilite; ctx.globalAlpha=0.5; ctx.lineWidth=2; ctx.beginPath(); ctx.arc(cx,cy, cell*0.42, 0, Math.PI*2); ctx.stroke(); ctx.globalAlpha=1;
+    // turn corner highlight
     drawTurnCornerHighlight();
+    // placement highlights
     ctx.strokeStyle=COLORS.hilite; ctx.lineWidth=3;
     state.highlight.forEach(p=>{ ctx.strokeRect(p.x*cell+3, p.y*cell+3, cell-6, cell-6); });
+    // ghost
     const P=currentPlayer();
     if(state.phase==='place' && state.hover && P.drawn){
       const {x,y}=state.hover;
@@ -581,9 +595,8 @@
         const cx = x*state.cell + state.cell/2;
         const cy = y*state.cell + state.cell/2;
         const r = state.cell*0.28;
-        const sweep = Math.abs(theta) * Math.PI / 180; // 90 or 180
+        const sweep = Math.abs(theta) * Math.PI / 180;
         const cw = theta > 0;
-        // Dimmer on empty/blocked cells so hints still show everywhere
         const isTrack = !!cellData.track && cellData.track!=='Block';
         ctx.globalAlpha = isTrack ? 0.58 : 0.22;
         ctx.strokeStyle = COLORS.hint;
