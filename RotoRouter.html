@@ -147,7 +147,7 @@
 
   // Utilities & state
   function shuffle(a){ for(let i=a.length-1;i>0;i--){ const j=Math.floor(Math.random()*(i+1)); [a[i],a[j]]=[a[j],a[i]]; } return a; }
-  function makeDeck(){ return { draw: shuffle([ ...Array(14).fill(TrackCard.Straight), ...Array(12).fill(TrackCard.Elbow), ...Array(4).fill(TrackCard.Cross), ...Array(2).fill(TrackCard.Block) ]), discard: [] }; }
+  function makeDeck(){ return { draw: shuffle([ ...Array(14).fill(TrackCard.Straight), ...Array(12).fill(TrackCard.Elbow), ...Array(4).fill(TrackCard.Cross) ]), discard: [] }; }
   function makeBoard(N){ const b=[]; for(let y=0;y<N;y++){ const r=[]; for(let x=0;x<N;x++){ r.push({track:null,rot:0,owner:null,token:null}); } b.push(r);} return b; }
 
   const UI = {
