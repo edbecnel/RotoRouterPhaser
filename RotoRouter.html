@@ -1,0 +1,643 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>RotoRouter — Vertical Slice (Rotation Hints Visible On All Cells)</title>
+  <style>
+    html, body { height: 100%; margin: 0; font-family: system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif; background: #0f1115; color: #e6e6e6; }
+    .app { display: grid; grid-template-columns: 360px 1fr; height: 100%; }
+    .sidebar { padding: 14px 16px; border-right: 1px solid #222835; background: #121723; overflow: auto; }
+    .sidebar h1 { font-size: 18px; margin: 0 0 8px; }
+    .sidebar h2 { font-size: 14px; margin: 16px 0 8px; color: #b7c1ff; }
+    .row { display: flex; gap: 8px; align-items: center; margin: 6px 0; flex-wrap: wrap; }
+    .btn { padding: 8px 10px; background: #1b2233; color: #fff; border: 1px solid #30384f; border-radius: 10px; cursor: pointer; font-weight: 600; }
+    .btn:disabled { opacity: 0.5; cursor: not-allowed; }
+    .tag { display: inline-block; padding: 2px 8px; border-radius: 999px; font-size: 12px; border: 1px solid #2a3249; background: #0f1626; }
+    .panel { border: 1px solid #1f2636; padding: 10px; border-radius: 12px; background: #0d1220; }
+    .muted { color: #9da6b8; }
+    .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+    .small { font-size: 12px; }
+    .legend { display: grid; grid-template-columns: auto 1fr; gap: 6px 10px; align-items: center; }
+    .dot { width: 12px; height: 12px; border-radius: 50%; display: inline-block; border: 1px solid #fff4; }
+    canvas { display: block; }
+    .toast { position: fixed; left: 380px; bottom: 16px; background: #182031; border: 1px solid #2b3650; padding: 10px 14px; border-radius: 10px; pointer-events: none; opacity: 0; transition: opacity .18s ease; }
+    .toast.show { opacity: 1; }
+    label.toggle { display:flex; align-items:center; gap:8px; font-size:12px; user-select:none; }
+  </style>
+</head>
+<body>
+  <div class="app">
+    <aside class="sidebar">
+      <h1>RotoRouter — Vertical Slice</h1>
+      <div class="panel">
+        <div class="row"><span class="tag" id="turnTag">Turn: —</span><span class="tag" id="phaseTag">Phase: —</span></div>
+        <div class="row small muted" id="status">New Game → Draw → Place. First placement is your corner.</div>
+      </div>
+
+      <h2>Setup</h2>
+      <div class="grid">
+        <label class="small muted">Board Size
+          <select id="boardSize">
+            <option value="9">9×9</option>
+            <option value="7">7×7</option>
+          </select>
+        </label>
+        <label class="small muted">Template
+          <select id="template">
+            <option value="open">Open Field</option>
+            <option value="fourwalls">Four Walls</option>
+            <option value="crossroads">Crossroads</option>
+          </select>
+        </label>
+      </div>
+      <div class="row"><button class="btn" id="newGameBtn">New Game</button></div>
+
+      <h2>Actions</h2>
+      <div class="panel">
+        <div class="row"><b>Track</b></div>
+        <div class="row">
+          <button class="btn" id="drawBtn">Draw</button>
+          <span id="drawnCard" class="tag">Card: —</span>
+          <span id="drawTag" class="tag">Draw: Ready</span>
+        </div>
+        <div class="row">
+          <button class="btn" id="placeBtn">Place</button>
+          <button class="btn" id="bottomBtn">Bottom</button>
+        </div>
+        <div class="row small muted">Hover shows a <b>ghost</b>. Click to place. Rotate with Q/E.</div>
+        <hr style="border-color:#1f2636"/>
+        <div class="row"><b>Token</b></div>
+        <div class="row">
+          <button class="btn" id="tokenBtn">Token Action</button>
+          <span id="tokenTag" class="tag">Token: Ready</span>
+          <span id="tokenCount" class="tag">Tokens: 0/3</span>
+        </div>
+        <div class="row small muted">Click a token to move along <b>connected pipes</b>, or click your <b>corner</b> (if open) to place a new token. One token action/turn. Max 3 tokens/player.</div>
+        <label class="toggle"><input type="checkbox" id="vizEdges"> Show connection edges</label>
+        <hr style="border-color:#1f2636"/>
+        <div class="row"><b>Rotation</b></div>
+        <div class="row">
+          <button class="btn" id="rollBtn">Roll Die</button>
+          <span id="dieFace" class="tag">Die: —</span>
+          <button class="btn" id="applyBtn" disabled>Apply</button>
+          <span id="rollTag" class="tag">Roll: Ready</span>
+        </div>
+        <div class="row small muted">Meshed gears: center rotates ±, neighbors alternate opposite across the grid. One roll per turn.</div>
+        <hr style="border-color:#1f2636"/>
+        <div class="row"><button class="btn" id="endTurnBtn">End Turn</button></div>
+      </div>
+
+      <h2>Corners</h2>
+      <div class="panel small legend">
+        <span class="dot" style="background:#ff6b6b"></span><div>Red — NW (0,0)</div>
+        <span class="dot" style="background:#6bff95"></span><div>Green — NE (N-1,0)</div>
+        <span class="dot" style="background:#6bd9ff"></span><div>Blue — SE (N-1,N-1)</div>
+        <span class="dot" style="background:#ffef6b"></span><div>Yellow — SW (0,N-1)</div>
+      </div>
+    </aside>
+    <main id="game"><canvas id="board"></canvas></main>
+  </div>
+  <div id="toast" class="toast"></div>
+
+<script>
+(function(){
+  const toast=(m)=>{ const el=document.getElementById('toast'); el.textContent=m; el.classList.add('show'); setTimeout(()=>el.classList.remove('show'),1100); };
+  const setStatus=(t)=>{ document.getElementById('status').innerHTML=t; };
+  const tag = (id)=>document.getElementById(id);
+  const turnTag=()=>tag('turnTag');
+  const phaseTag=()=>tag('phaseTag');
+  const drawnTag=()=>tag('drawnCard');
+  const drawTag=()=>tag('drawTag');
+  const dieTag=()=>tag('dieFace');
+  const rollTag=()=>tag('rollTag');
+  const tokenTag=()=>tag('tokenTag');
+  const tokenCount=()=>tag('tokenCount');
+  const btn=(id)=>document.getElementById(id);
+
+  // Colors & constants
+  const COLORS={ bg:'#0b0f18', grid:'#263145', gear:'#202a3d', track:'#6d7aa6', block:'#434b63', slot:'#a8b7ff', hilite:'#9efff4', tokenR:'#ff6b6b', tokenG:'#6bff95', tokenB:'#6bd9ff', tokenY:'#ffef6b', edge:'#f4b86a', hint:'#c7f0ff' };
+  const TrackCard={ Straight:'Straight', Elbow:'Elbow', Cross:'Cross', Block:'Block' };
+  const DIE_FACES=['X','X','X','CW90','CCW90','DEG180'];
+  const TOKENS_MAX=3;
+  const PLAYERS=[
+    { id:0, name:'Red', color: COLORS.tokenR, pocket:'NW' },
+    { id:1, name:'Green', color: COLORS.tokenG, pocket:'NE' },
+    { id:2, name:'Blue', color: COLORS.tokenB, pocket:'SE' },
+    { id:3, name:'Yellow', color: COLORS.tokenY, pocket:'SW' },
+  ];
+
+  // Openings — Elbow base = EAST+NORTH (NE), Straight is horizontal base
+  const OPENINGS={
+    Straight: [[1,0],[-1,0]],
+    Elbow: [[1,0],[0,-1]],
+    Cross: [[1,0],[-1,0],[0,1],[0,-1]]
+  };
+  function rotDir([dx,dy],deg){ const t=((deg%360)+360)%360; if(t===0) return [dx,dy]; if(t===90) return [-dy,dx]; if(t===180) return [-dx,-dy]; if(t===270) return [dy,-dx]; return [dx,dy]; }
+  function rotatedOpenings(cell){
+    if(!cell.track || cell.track==='Block') return [];
+    return OPENINGS[cell.track].map(([dx,dy])=>rotDir([dx,dy], cell.rot));
+  }
+  function hasReciprocal(aCell, bCell, dx, dy){
+    const aOk = rotatedOpenings(aCell).some(([rx,ry])=>rx===dx && ry===dy);
+    if(!aOk) return false;
+    const bOk = rotatedOpenings(bCell).some(([rx,ry])=>rx===-dx && ry===-dy);
+    return bOk;
+  }
+
+  // Utilities & state
+  function shuffle(a){ for(let i=a.length-1;i>0;i--){ const j=Math.floor(Math.random()*(i+1)); [a[i],a[j]]=[a[j],a[i]]; } return a; }
+  function makeDeck(){ return { draw: shuffle([ ...Array(8).fill(TrackCard.Straight), ...Array(6).fill(TrackCard.Elbow), ...Array(2).fill(TrackCard.Cross), ...Array(2).fill(TrackCard.Block) ]), discard: [] }; }
+  function makeBoard(N){ const b=[]; for(let y=0;y<N;y++){ const r=[]; for(let x=0;x<N;x++){ r.push({track:null,rot:0,owner:null,token:null}); } b.push(r);} return b; }
+
+  const UI = {
+    boardSize:()=>document.getElementById('boardSize'),
+    template:()=>document.getElementById('template'),
+    canvas:()=>document.getElementById('board'),
+    vizEdges:()=>document.getElementById('vizEdges'),
+  };
+
+  const state={ N:9, cell:64, pad:20, board:makeBoard(9),
+    players:PLAYERS.map(p=>({...p, deck:makeDeck(), drawn:null, tokens:0, drawLocked:false, drawUsed:false, tokenUsed:false, rollUsed:false})),
+    current:0, phase:'idle', subphase:null, highlight:[], hover:null, previewRot:0, die:null, tokenSelect:null,
+    turnAdvancing:false
+  };
+  const canvas=UI.canvas(); const ctx=canvas.getContext('2d');
+
+  function resize(){
+    const rightW = window.innerWidth - 360; const h = window.innerHeight;
+    const size = Math.min(rightW, h) * 0.95;
+    state.cell = Math.floor(size / state.N);
+    state.pad = Math.floor((Math.min(rightW, h) - state.cell*state.N)/2);
+    canvas.width = rightW; canvas.height = h;
+    render();
+  }
+  window.addEventListener('resize', resize);
+
+  function currentPlayer(){ return state.players[state.current]; }
+  function cornerFor(pid){
+    const N=state.N; const p=PLAYERS[pid].pocket;
+    if(p==='NW') return {x:0,y:0}; if(p==='NE') return {x:N-1,y:0}; if(p==='SE') return {x:N-1,y:N-1}; return {x:0,y:N-1};
+  }
+  function owned(pid){ const out=[]; for(let y=0;y<state.N;y++) for(let x=0;x<state.N;x++){ const c=state.board[y][x]; if(c.track && c.owner===pid) out.push({x,y}); } return out; }
+  function within(x,y){ return x>=0 && y>=0 && x<state.N && y<state.N; }
+
+  // Count tokens for a player
+  function countTokens(pid){
+    let n=0;
+    for(let y=0;y<state.N;y++) for(let x=0;x<state.N;x++){ if(state.board[y][x].token===pid) n++; }
+    return n;
+  }
+  function allTokensOf(pid){
+    const arr=[];
+    for(let y=0;y<state.N;y++) for(let x=0;x<state.N;x++){ if(state.board[y][x].token===pid) arr.push({x,y}); }
+    return arr;
+  }
+
+  // BFS for token moves — iterate over actual openings
+  function reachableFrom(start){
+    const vis=new Set(); const q=[start]; const out=[];
+    const key=(x,y)=>x+','+y; vis.add(key(start.x,start.y));
+    while(q.length){
+      const {x,y}=q.shift();
+      const here=state.board[y][x];
+      if(!here.track || here.track==='Block') continue;
+      for(const [dx,dy] of rotatedOpenings(here)){
+        const nx=x+dx, ny=y+dy; if(!within(nx,ny)) continue;
+        const there=state.board[ny][nx];
+        if(!there.track || there.track==='Block') continue;
+        if(there.token!=null) continue;
+        if(!hasReciprocal(here, there, dx, dy)) continue;
+        const k=key(nx,ny); if(!vis.has(k)){ vis.add(k); q.push({x:nx,y:ny}); out.push({x:nx,y:ny}); }
+      }
+    }
+    return out;
+  }
+
+  // Game flow
+  function newGame(){
+    state.N = parseInt(UI.boardSize().value,10);
+    state.board = makeBoard(state.N);
+    state.players = PLAYERS.map(p=>({...p, deck:makeDeck(), drawn:null, tokens:0, drawLocked:false, drawUsed:false, tokenUsed:false, rollUsed:false}));
+    state.current = 0;
+    startTurn();
+    setStatus('New game. Draw → Place. First placement = corner only.');
+  }
+
+  function startTurn(){
+    // Reset flags for incoming player & refresh HUD
+    const P=currentPlayer();
+    P.drawLocked=false; P.drawUsed=false; P.tokenUsed=false; P.rollUsed=false;
+    state.phase='idle'; state.subphase=null; state.highlight=[]; state.hover=null; state.previewRot=0; state.die=null; state.tokenSelect=null;
+    updateHUD();
+  }
+
+  function endTurnImmediate(){
+    state.current=(state.current+1)%state.players.length;
+    startTurn();
+    setStatus('Turn passed.');
+    state.turnAdvancing=false;
+  }
+
+  function endTurn(){
+    if(state.turnAdvancing) return;
+    state.turnAdvancing=true;
+    setTimeout(endTurnImmediate, 120);
+  }
+
+  // Draw (1/turn)
+  function drawCard(){
+    const P=currentPlayer();
+    if(P.drawLocked){ setStatus('You bottomed this turn; drawing is locked until End Turn.'); return; }
+    if(P.drawUsed){ setStatus('You have already drawn this turn. End Turn to draw again next turn.'); return; }
+    if(P.drawn){ setStatus('Already holding a card. Place or Bottom.'); return; }
+    if(P.deck.draw.length===0 && P.deck.discard.length>0){ P.deck.draw=shuffle(P.deck.discard.splice(0)); }
+    if(P.deck.draw.length===0){ setStatus('Deck empty.'); return; }
+    P.drawn=P.deck.draw.shift();
+    P.drawUsed = true;
+    updateHUD(); setStatus(`${P.name} drew ${P.drawn}. Click Place.`);
+  }
+  function computePlaceHighlights(){
+    const pid=currentPlayer().id; const ownCells=owned(pid);
+    if(ownCells.length===0){ const c=cornerFor(pid); const cell=state.board[c.y][c.x]; state.highlight = (!cell.track && !cell.token) ? [c] : []; return; }
+    const adj=new Map();
+    for(const p of ownCells){
+      [[p.x+1,p.y],[p.x-1,p.y],[p.x,p.y+1],[p.x,p.y-1]].forEach(([x,y])=>{
+        if(within(x,y)){ const c=state.board[y][x]; if(!c.track && c.token==null) adj.set(x+','+y,{x,y}); }
+      });
+    }
+    state.highlight = Array.from(adj.values());
+  }
+  function placeMode(){
+    const P=currentPlayer();
+    if(!P.drawn){ setStatus('Draw a card first.'); return; }
+    state.phase='place'; state.subphase=null; computePlaceHighlights(); updateHUD(); setStatus('Placement: hover to preview, click to confirm. Rotate with Q/E.');
+  }
+  function bottomCard(){
+    const P=currentPlayer();
+    if(!P.drawn){ setStatus('Nothing to bottom.'); return; }
+    P.deck.draw.push(P.drawn); P.drawn=null;
+    P.drawLocked = true;
+    state.phase='idle'; state.highlight=[]; state.hover=null;
+    updateHUD(); setStatus('Bottomed. Drawing is locked until End Turn.');
+    maybeAutoAdvance();
+  }
+
+  // Token flow (select-first; corner placement allowed if < TOKENS_MAX)
+  function tokenMode(){
+    const P=currentPlayer();
+    if(P.tokenUsed){ setStatus('Token action already used this turn.'); return; }
+    state.phase = 'token'; state.subphase='select'; state.highlight=[]; state.hover=null; state.tokenSelect=null;
+
+    const myTokens = allTokensOf(P.id);
+    const options = [...myTokens];
+    const corner = cornerFor(P.id);
+    const cCell = state.board[corner.y][corner.x];
+    const myCount = countTokens(P.id);
+    if(myCount < TOKENS_MAX && cCell.track && cCell.owner===P.id && cCell.token==null){
+      options.push(corner);
+    }
+    state.highlight = options;
+    if(options.length===0){
+      setStatus('No token moves or corner placement available. Auto-advancing turn…');
+      endTurn();
+      return;
+    }
+    setStatus('Token: click a token to move OR click your corner to place a new token.');
+    updateHUD();
+  }
+
+  // Rotation: meshed gears + hints (direction-correct)
+  function rollDie(){
+    const P=currentPlayer();
+    if(P.rollUsed){ setStatus('You have already rolled this turn.'); return; }
+    const r = Math.floor(Math.random()*6); state.die = DIE_FACES[r];
+    P.rollUsed = true;
+    dieTag().textContent='Die: '+state.die; rollTag().textContent='Roll: Used';
+    setStatus('Die rolled: '+state.die+'. Hints show per-cell rotation. Click Apply to rotate.');
+    btn('applyBtn').disabled = (state.die==='X');
+    render();
+  }
+  function thetaFor(face){ if(face==='CW90') return 90; if(face==='CCW90') return -90; if(face==='DEG180') return 180; return 0; }
+  function mod360(a){ return (((a%360)+360)%360); }
+  function applyRotation(){
+    if(!state.die || state.die==='X') return;
+    const base = thetaFor(state.die);
+    let rotated=0;
+    for(let y=0;y<state.N;y++){
+      for(let x=0;x<state.N;x++){
+        const cell=state.board[y][x];
+        if(!cell.track || cell.track==='Block') continue;
+        const sign = ((x + y) % 2 === 0) ? 1 : -1;
+        cell.rot = mod360(cell.rot + sign*base);
+        rotated++;
+      }
+    }
+    state.die=null; dieTag().textContent='Die: —'; btn('applyBtn').disabled = true;
+    setStatus('Meshed rotation applied to '+rotated+' track cell(s).'); render();
+    maybeAutoAdvance();
+  }
+
+  // Auto-advance heuristic
+  function maybeAutoAdvance(){
+    const P=currentPlayer();
+    if(!P.drawUsed && !P.drawLocked && !P.drawn) return;
+    if(P.drawn) return;
+    if(!P.tokenUsed){
+      const myTokens = allTokensOf(P.id);
+      const corner = cornerFor(P.id);
+      const cCell = state.board[corner.y][corner.x];
+      const myCount = countTokens(P.id);
+      let hasOption = false;
+      if(myCount < TOKENS_MAX && cCell.track && cCell.owner===P.id && cCell.token==null){ hasOption = true; }
+      if(!hasOption){
+        for(const t of myTokens){
+          if(reachableFrom(t).length>0){ hasOption=true; break; }
+        }
+      }
+      if(hasOption) return;
+    }
+    if(!P.rollUsed) return;
+    setStatus('No actions remaining. Auto-advancing turn…');
+    endTurn();
+  }
+
+  // Canvas interactions
+  function toCell(px,py){
+    const x = Math.floor((px - state.pad) / state.cell);
+    const y = Math.floor((py - state.pad) / state.cell);
+    return {x,y};
+  }
+
+  const canvasEl=UI.canvas();
+  canvasEl.addEventListener('mousemove', (e)=>{
+    const rect=canvasEl.getBoundingClientRect(); const {x,y}=toCell(e.clientX-rect.left, e.clientY-rect.top);
+    if(x<0||y<0||x>=state.N||y>=state.N){ state.hover=null; render(); return; }
+    state.hover={x,y}; render();
+  });
+  canvasEl.addEventListener('click', (e)=>{
+    const rect=canvasEl.getBoundingClientRect(); const {x,y}=toCell(e.clientX-rect.left, e.clientY-rect.top);
+    if(x<0||y<0||x>=state.N||y>=state.N) return;
+
+    // PLACE phase
+    if(state.phase==='place'){
+      const legal = state.highlight.some(h=>h.x===x&&h.y===y);
+      if(!legal){ toast('Not a legal cell'); return; }
+      const P=currentPlayer(); const cell=state.board[y][x];
+      if(cell.track){ toast('Cell occupied'); return; }
+      cell.track=P.drawn; cell.rot=state.previewRot; cell.owner=P.id; P.deck.discard.push(P.drawn); P.drawn=null;
+      pulse(x,y);
+      state.phase='idle'; state.highlight=[]; state.hover=null; updateHUD(); setStatus('Placed. You cannot draw again this turn.');
+      maybeAutoAdvance();
+      return;
+    }
+
+    // TOKEN phase
+    if(state.phase==='token'){
+      const P=currentPlayer();
+      if(state.subphase==='select'){
+        const isMine = state.board[y][x].token===P.id;
+        if(isMine){
+          const from = {x,y};
+          const moves = reachableFrom(from);
+          if(moves.length===0){
+            setStatus('No connected destinations from that token. Auto-advancing…');
+            state.phase='idle'; state.highlight=[]; render();
+            endTurn();
+            return;
+          }
+          state.tokenSelect = from; state.highlight = moves; state.subphase='target';
+          setStatus('Token: choose a connected destination (pipe rules).'); render(); return;
+        }
+        const corner = cornerFor(P.id);
+        if(corner.x===x && corner.y===y){
+          const cCell = state.board[corner.y][corner.x];
+          const myCount = countTokens(P.id);
+          if(myCount >= TOKENS_MAX){ toast('You already have the maximum of 3 tokens.'); return; }
+          if(!(cCell.track && cCell.owner===P.id && cCell.token==null)){ toast('Corner must have your track and be open.'); return; }
+          cCell.token = P.id; state.players[P.id].tokens = myCount+1;
+          P.tokenUsed = true; tokenTag().textContent='Token: Used'; btn('tokenBtn').disabled = true;
+          state.phase='idle'; state.subphase=null; state.highlight=[]; state.tokenSelect=null; setStatus('New token placed at your corner.'); render(); updateHUD();
+          maybeAutoAdvance();
+          return;
+        }
+        toast('Select your token to move, or your open corner to place a new one.');
+      } else if(state.subphase==='target'){
+        const legal = state.highlight.some(h=>h.x===x&&h.y===y);
+        if(!legal){ toast('Pick a connected destination.'); return; }
+        const from = state.tokenSelect;
+        state.board[from.y][from.x].token=null;
+        state.board[y][x].token=currentPlayer().id;
+        currentPlayer().tokenUsed = true; tokenTag().textContent='Token: Used'; btn('tokenBtn').disabled = true;
+        state.phase='idle'; state.subphase=null; state.highlight=[]; state.tokenSelect=null; setStatus('Token moved.'); render(); updateHUD();
+        maybeAutoAdvance();
+        return;
+      }
+    }
+  });
+
+  window.addEventListener('keydown', (e)=>{
+    if(e.key==='q' || e.key==='Q'){ state.previewRot=(state.previewRot+270)%360; render(); }
+    if(e.key==='e' || e.key==='E'){ state.previewRot=(state.previewRot+90)%360; render(); }
+  });
+
+  // Wire buttons
+  btn('newGameBtn').addEventListener('click', newGame);
+  btn('drawBtn').addEventListener('click', drawCard);
+  btn('placeBtn').addEventListener('click', placeMode);
+  btn('bottomBtn').addEventListener('click', bottomCard);
+  btn('endTurnBtn').addEventListener('click', endTurn);
+  btn('tokenBtn').addEventListener('click', tokenMode);
+  btn('rollBtn').addEventListener('click', rollDie);
+  btn('applyBtn').addEventListener('click', applyRotation);
+  UI.vizEdges().addEventListener('change', render);
+
+  function updateHUD(){
+    const P=currentPlayer();
+    turnTag().textContent='Turn: '+P.name+' ('+P.pocket+')';
+    phaseTag().textContent='Phase: '+state.phase;
+    drawnTag().textContent='Card: '+(P.drawn || '—');
+    dieTag().textContent='Die: '+(state.die || '—');
+    drawTag().textContent='Draw: '+(P.drawLocked ? 'Locked' : (P.drawUsed ? 'Used' : 'Ready'));
+    rollTag().textContent='Roll: '+(P.rollUsed ? 'Used' : 'Ready');
+    btn('drawBtn').disabled = !!P.drawn || !!P.drawLocked || !!P.drawUsed;
+    btn('applyBtn').disabled = !(state.die && state.die!=='X');
+    btn('tokenBtn').disabled = !!P.tokenUsed;
+    btn('rollBtn').disabled = !!P.rollUsed;
+    tokenTag().textContent = 'Token: ' + (P.tokenUsed ? 'Used' : 'Ready');
+    tokenCount().textContent = 'Tokens: ' + countTokens(P.id) + '/' + TOKENS_MAX;
+    if(!P.drawn && !P.drawLocked && !P.drawUsed){ btn('drawBtn').disabled = false; }
+    render();
+  }
+
+  function render(){
+    const N=state.N, cell=state.cell, pad=state.pad;
+    ctx.clearRect(0,0,canvas.width,canvas.height);
+    ctx.fillStyle=COLORS.bg; ctx.fillRect(0,0,canvas.width,canvas.height);
+    ctx.save(); ctx.translate(pad,pad);
+    const size=cell*N;
+    ctx.strokeStyle=COLORS.grid; ctx.lineWidth=1;
+    ctx.strokeRect(0,0,size,size);
+    for(let i=1;i<N;i++){ ctx.beginPath(); ctx.moveTo(i*cell,0); ctx.lineTo(i*cell,size); ctx.stroke(); ctx.beginPath(); ctx.moveTo(0,i*cell); ctx.lineTo(size,i*cell); ctx.stroke(); }
+    for(let y=0;y<N;y++) for(let x=0;x<N;x++){ drawGear(x,y); }
+    for(let y=0;y<N;y++) for(let x=0;x<N;x++){ const c=state.board[y][x]; if(c.track) drawTrack(c.track, c.rot, x,y,1); }
+    for(let y=0;y<N;y++) for(let x=0;x<N;x++){ const c=state.board[y][x]; if(c.token!=null) drawToken(c.token,x,y); }
+    if(UI.vizEdges().checked){ drawEdges(); }
+    if(state.die && state.die!=='X'){ drawRotationHints(); }
+    const cc=Math.floor(N/2); const cx=cc*cell+cell/2, cy=cc*cell+cell/2;
+    ctx.strokeStyle=COLORS.hilite; ctx.globalAlpha=0.5; ctx.lineWidth=2; ctx.beginPath(); ctx.arc(cx,cy, cell*0.42, 0, Math.PI*2); ctx.stroke(); ctx.globalAlpha=1;
+    drawTurnCornerHighlight();
+    ctx.strokeStyle=COLORS.hilite; ctx.lineWidth=3;
+    state.highlight.forEach(p=>{ ctx.strokeRect(p.x*cell+3, p.y*cell+3, cell-6, cell-6); });
+    const P=currentPlayer();
+    if(state.phase==='place' && state.hover && P.drawn){
+      const {x,y}=state.hover;
+      const legal=state.highlight.some(h=>h.x===x&&h.y===y);
+      if(legal) drawTrack(P.drawn, state.previewRot, x,y,0.55);
+    }
+    ctx.restore();
+  }
+
+  function drawTurnCornerHighlight(){
+    const P=currentPlayer();
+    const corner = cornerFor(P.id);
+    const cell=state.cell;
+    ctx.save();
+    ctx.lineWidth = 4;
+    ctx.strokeStyle = P.color;
+    ctx.globalAlpha = 0.95;
+    ctx.strokeRect(corner.x*cell+2, corner.y*cell+2, cell-4, cell-4);
+    ctx.globalAlpha = 0.18;
+    ctx.fillStyle = P.color;
+    ctx.fillRect(corner.x*cell+3, corner.y*cell+3, cell-6, cell-6);
+    ctx.restore();
+  }
+
+  function drawEdges(){
+    const cell=state.cell;
+    ctx.save();
+    ctx.strokeStyle=COLORS.edge;
+    ctx.lineWidth=2;
+    for(let y=0;y<state.N;y++){
+      for(let x=0;x<state.N;x++){
+        const a=state.board[y][x];
+        if(!a.track || a.track==='Block') continue;
+        for(const [dx,dy] of rotatedOpenings(a)){
+          const nx=x+dx, ny=y+dy; if(!within(nx,ny)) continue;
+          const b=state.board[ny][nx];
+          if(!b.track || b.track==='Block') continue;
+          if(hasReciprocal(a,b,dx,dy)){
+            const x1=(x+0.5)*cell, y1=(y+0.5)*cell;
+            const x2=(nx+0.5)*cell, y2=(ny+0.5)*cell;
+            ctx.beginPath(); ctx.moveTo(x1, y1); ctx.lineTo(x2, y2); ctx.stroke();
+          }
+        }
+      }
+    }
+    ctx.restore();
+  }
+
+  function drawGear(x,y){
+    const cell=state.cell;
+    const cx=x*cell+cell/2, cy=y*cell+cell/2;
+    ctx.strokeStyle=COLORS.grid; ctx.lineWidth=1; ctx.strokeRect(x*cell, y*cell, cell, cell);
+    ctx.strokeStyle=COLORS.grid; ctx.lineWidth=2;
+    ctx.beginPath(); ctx.arc(cx, cy, cell/2-4, 0, Math.PI*2); ctx.stroke();
+    ctx.fillStyle='#202a3d';
+    ctx.beginPath(); ctx.arc(cx, cy, cell/2-7, 0, Math.PI*2); ctx.fill();
+  }
+
+  function drawTrack(type, rot, x,y, alpha){
+    const cell=state.cell; const cx=x*cell+cell/2, cy=y*cell+cell/2; const r=cell/2-8;
+    ctx.save(); ctx.globalAlpha=alpha; ctx.translate(cx,cy); ctx.rotate(rot*Math.PI/180);
+    if(type==='Block'){
+      ctx.fillStyle='#434b63'; ctx.beginPath(); ctx.arc(0,0,r,0,Math.PI*2); ctx.fill();
+      ctx.strokeStyle=COLORS.grid; ctx.lineWidth=2; ctx.beginPath(); ctx.arc(0,0,r,0,Math.PI*2); ctx.stroke();
+    } else {
+      ctx.fillStyle=COLORS.track; ctx.beginPath(); ctx.arc(0,0,r,0,Math.PI*2); ctx.fill();
+      ctx.strokeStyle=COLORS.slot; ctx.lineWidth=6;
+      if(type==='Straight'){ ctx.beginPath(); ctx.moveTo(-r*0.85,0); ctx.lineTo(r*0.85,0); ctx.stroke(); }
+      if(type==='Elbow'){ ctx.beginPath(); ctx.moveTo(0,-r*0.85); ctx.lineTo(0,0); ctx.lineTo(r*0.85,0); ctx.stroke(); }
+      if(type==='Cross'){
+        ctx.beginPath(); ctx.moveTo(-r*0.85,0); ctx.lineTo(r*0.85,0); ctx.stroke();
+        ctx.beginPath(); ctx.moveTo(0,-r*0.85); ctx.lineTo(0,r*0.85); ctx.stroke();
+      }
+    }
+    ctx.restore();
+  }
+
+  // --- Rotation hints overlay (direction-correct; visible on all cells) ---
+  function drawRotationHints(){
+    const base = thetaFor(state.die);
+    if(base===0) return;
+    ctx.save();
+    ctx.lineWidth = 3;
+
+    for(let y=0;y<state.N;y++){
+      for(let x=0;x<state.N;x++){
+        const cellData = state.board[y][x];
+        const sign = ((x + y) % 2 === 0) ? 1 : -1;
+        const theta = sign * base;
+        const cx = x*state.cell + state.cell/2;
+        const cy = y*state.cell + state.cell/2;
+        const r = state.cell*0.28;
+        const sweep = Math.abs(theta) * Math.PI / 180; // 90 or 180
+        const cw = theta > 0;
+        // Dimmer on empty/blocked cells so hints still show everywhere
+        const isTrack = !!cellData.track && cellData.track!=='Block';
+        ctx.globalAlpha = isTrack ? 0.58 : 0.22;
+        ctx.strokeStyle = COLORS.hint;
+        drawArrowArcDir(cx, cy, r, sweep, cw);
+      }
+    }
+    ctx.restore();
+  }
+
+  function drawArrowArcDir(cx, cy, r, sweep, cw){
+    const start = -Math.PI/2;
+    const end = cw ? (start + sweep) : (start - sweep);
+    const anticlockwise = !cw;
+    ctx.beginPath();
+    ctx.arc(cx, cy, r, start, end, anticlockwise);
+    ctx.stroke();
+    // Arrowhead at end
+    const ax = cx + r*Math.cos(end);
+    const ay = cy + r*Math.sin(end);
+    const t = end + (cw ? Math.PI/2 : -Math.PI/2);
+    const len = 8;
+    ctx.beginPath();
+    ctx.moveTo(ax, ay);
+    ctx.lineTo(ax - len*Math.cos(t - 0.4), ay - len*Math.sin(t - 0.4));
+    ctx.moveTo(ax, ay);
+    ctx.lineTo(ax - len*Math.cos(t + 0.4), ay - len*Math.sin(t + 0.4));
+    ctx.stroke();
+  }
+
+  function drawToken(pid,x,y){
+    const color = PLAYERS[pid].color; const cell=state.cell;
+    const cx=x*cell+cell/2, cy=y*cell+cell/2; const r=cell/2-12;
+    ctx.fillStyle=color; ctx.globalAlpha=0.75; ctx.beginPath(); ctx.arc(cx,cy,r,0,Math.PI*2); ctx.fill(); ctx.globalAlpha=1;
+    ctx.strokeStyle='#fff'; ctx.lineWidth=2; ctx.beginPath(); ctx.arc(cx,cy,r,0,Math.PI*2); ctx.stroke();
+  }
+
+  function pulse(x,y){
+    const cell=state.cell; const pad=state.pad; const cx=pad+(x+0.5)*cell, cy=pad+(y+0.5)*cell; const r0=6, r1=26;
+    const start=performance.now();
+    function step(t){
+      const k=Math.min(1,(t-start)/280);
+      ctx.save();
+      ctx.strokeStyle=COLORS.hilite; ctx.lineWidth=3; ctx.globalAlpha=1-k;
+      ctx.beginPath(); ctx.arc(cx, cy, r0 + (r1-r0)*k, 0, Math.PI*2); ctx.stroke();
+      ctx.restore();
+      if(k<1){ requestAnimationFrame(step); } else { render(); }
+    }
+    requestAnimationFrame(step);
+  }
+
+  // initial
+  resize();
+  startTurn();
+  setStatus('New Game → Draw → Place. First placement is your corner.');
+})();</script>
+</body>
+</html>
