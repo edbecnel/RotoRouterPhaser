@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>RotoRouter — Vertical Slice (Full Build)</title>
+  <title>RotoRouter — Vertical Slice (Token-Adjacent Placement, Playable)</title>
   <style>
     html, body { height: 100%; margin: 0; font-family: system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif; background: #0f1115; color: #e6e6e6; }
     .app { display: grid; grid-template-columns: 360px 1fr; height: 100%; }
@@ -147,7 +147,7 @@
 
   // Utilities & state
   function shuffle(a){ for(let i=a.length-1;i>0;i--){ const j=Math.floor(Math.random()*(i+1)); [a[i],a[j]]=[a[j],a[i]]; } return a; }
-  function makeDeck(){ return { draw: shuffle([ ...Array(8).fill(TrackCard.Straight), ...Array(6).fill(TrackCard.Elbow), ...Array(2).fill(TrackCard.Cross), ...Array(2).fill(TrackCard.Block) ]), discard: [] }; }
+  function makeDeck(){ return { draw: shuffle([ ...Array(14).fill(TrackCard.Straight), ...Array(12).fill(TrackCard.Elbow), ...Array(4).fill(TrackCard.Cross), ...Array(2).fill(TrackCard.Block) ]), discard: [] }; }
   function makeBoard(N){ const b=[]; for(let y=0;y<N;y++){ const r=[]; for(let x=0;x<N;x++){ r.push({track:null,rot:0,owner:null,token:null}); } b.push(r);} return b; }
 
   const UI = {
@@ -257,17 +257,42 @@
     P.drawUsed = true;
     updateHUD(); setStatus(`${P.name} drew ${P.drawn}. Click Place.`);
   }
+
+  // Placement includes adjacency to player's tokens (even if token is on opponent tile)
   function computePlaceHighlights(){
-    const pid=currentPlayer().id; const ownCells=owned(pid);
-    if(ownCells.length===0){ const c=cornerFor(pid); const cell=state.board[c.y][c.x]; state.highlight = (!cell.track && !cell.token) ? [c] : []; return; }
-    const adj=new Map();
-    for(const p of ownCells){
+    const pid=currentPlayer().id;
+    const myOwned = owned(pid);
+    const myTokens = allTokensOf(pid);
+
+    // If no owned cells AND no tokens yet: only corner for first placement
+    if(myOwned.length===0 && myTokens.length===0){
+      const c=cornerFor(pid);
+      const cell=state.board[c.y][c.x];
+      state.highlight = (!cell.track && !cell.token) ? [c] : [];
+      return;
+    }
+
+    const adj = new Map();
+    // Adjacent to owned tracks
+    for(const p of myOwned){
       [[p.x+1,p.y],[p.x-1,p.y],[p.x,p.y+1],[p.x,p.y-1]].forEach(([x,y])=>{
-        if(within(x,y)){ const c=state.board[y][x]; if(!c.track && c.token==null) adj.set(x+','+y,{x,y}); }
+        if(!within(x,y)) return;
+        const c=state.board[y][x];
+        if(!c.track && c.token==null) adj.set(x+','+y,{x,y});
       });
     }
+    // Adjacent to any of my tokens
+    for(const t of myTokens){
+      [[t.x+1,t.y],[t.x-1,t.y],[t.x,t.y+1],[t.x,t.y-1]].forEach(([x,y])=>{
+        if(!within(x,y)) return;
+        const c=state.board[y][x];
+        if(!c.track && c.token==null) adj.set(x+','+y,{x,y});
+      });
+    }
+
     state.highlight = Array.from(adj.values());
   }
+
   function placeMode(){
     const P=currentPlayer();
     if(!P.drawn){ setStatus('Draw a card first.'); return; }
@@ -341,11 +366,8 @@
   // Auto-advance heuristic
   function maybeAutoAdvance(){
     const P=currentPlayer();
-    // If you haven't drawn & aren't locked & don't hold a card, still possible to draw — do not advance
     if(!P.drawUsed && !P.drawLocked && !P.drawn) return;
-    // If you're holding a card, you still have work — do not advance
     if(P.drawn) return;
-    // If token action still available and any option exists, do not advance
     if(!P.tokenUsed){
       const myTokens = allTokensOf(P.id);
       const corner = cornerFor(P.id);
@@ -360,7 +382,6 @@
       }
       if(hasOption) return;
     }
-    // If roll not used yet, still an action — do not advance
     if(!P.rollUsed) return;
     setStatus('No actions remaining. Auto-advancing turn…');
     endTurn();
