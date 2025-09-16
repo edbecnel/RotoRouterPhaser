@@ -100,6 +100,39 @@
   </div>
   <div id="toast" class="toast"></div>
 
+<!--
+RotoRouter — Baseline (User-Attached) — COMMENTED EDITION
+
+This file is a *verbatim copy* of your uploaded baseline with additional comments to help future contributors.
+Nothing functional has been removed; comments are inserted only in safe places.
+
+OVERVIEW
+- Sidebar UI preserved: Setup (board size, templates), Actions (Draw/Place/Bottom, Token Action, Roll/Apply, End Turn),
+  Corners legend, connection-edge toggle, hover ghost with Q/E rotation, toast/status HUD.
+- Canvas renderer preserved: gears background, tracks (Straight/Elbow/Cross/Block), tokens,
+  connection edges visualizer, rotation hints (meshed), turn-corner highlight, placement highlights, pulse effect.
+
+DATA MODEL (as implemented in your JS)
+- state: {
+    N, cell, pad, board[N][N], players[4] with per-player deck/discard/flags,
+    current (turn index), phase ('idle'|'place'|'token'), subphase, highlight[], hover?, previewRot,
+    die (rolled face), tokenSelect?, turnAdvancing
+  }
+- board[y][x]: { track: 'Straight'|'Elbow'|'Cross'|'Block'|null, rot: 0|90|180|270, owner: playerId|null, token: playerId|null }
+- players: fixed corners (NW/NE/SE/SW), color, per-turn flags (drawLocked, drawUsed, tokenUsed, rollUsed), deck {draw[], discard[]}, drawn card.
+
+ALGORITHMS & RULES
+- Decks: per-player, shuffled. Composition per your baseline: Straight×14, Elbow×12, Cross×4. Block is present as a type for templates but not in the draw deck.
+- Placement: first placement corner-only (must be empty); thereafter legal cells are union of empties adjacent to any OWNED track plus empties adjacent to any of YOUR TOKENS.
+- Token movement: BFS over "pipes" requiring reciprocal openings; occupancy blocked by tokens; traversal allowed over any owner's tracks once networks connect.
+- Rotation: die faces = X, CW90, CCW90, 180; Apply rotates all track tiles with checkerboard meshed-gear parity (even cells clockwise for CW90, odd cells CCW, etc.). Hints draw per-cell arcs.
+- Auto-advance: ends turn when draw/place/token/roll options are exhausted (heuristic matches your baseline's logic).
+- UI locks: one draw per turn (bottoming locks drawing), one token action per turn, one roll per turn.
+
+SAFE COMMENT STRATEGY
+- This header is placed before the main script tag.
+- No modifications to function/variable names or logic; rendering and input wiring untouched.
+-->
 <script>
 (function(){
   const toast=(m)=>{ const el=document.getElementById('toast'); el.textContent=m; el.classList.add('show'); setTimeout(()=>el.classList.remove('show'),1100); };
