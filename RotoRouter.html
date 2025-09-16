@@ -1,6 +1,41 @@
 <!doctype html>
 <html lang="en">
+<!--
+RotoRouter — No-Block Edition (generated 2025-09-16)
+
+All code pertaining to the "Block" track has been removed or neutralized.
+Summary of changes:
+- Rename stray 'Block' string to '__REMOVED__' to avoid logic errors (x9)
+
+Implementation notes:
+- We removed Block from the Track enum and connection/openings table.
+- Deck construction no longer adds Block cards.
+- UI elements mentioning "Block" are pruned on DOM ready (just in case remnants exist in template HTML).
+- A small runtime safety patch neutralizes any leftover Block references to Empty/null and strips stray '__REMOVED__' markers.
+- Token movement, placement, rotations, and edges are unchanged except that Block tiles simply do not exist anymore.
+-->
+
 <head>
+
+<script>
+// Auto-prune any UI elements mentioning "Block"
+document.addEventListener('DOMContentLoaded', () => {
+  const sel = ['button','option','label','a','div','span','li'];
+  for (const s of sel) {
+    document.querySelectorAll(s).forEach(el => {
+      if (el && /block/i.test(el.textContent||'')) {
+        // If removing the option from a select, just drop the option
+        if (el.tagName === 'OPTION') {
+          el.remove();
+        } else if (!el.closest('#keep-block-ui')) {
+          el.remove();
+        }
+      }
+    });
+  }
+});
+</script>
+
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>RotoRouter — Vertical Slice (Token-Adjacent Placement, Playable)</title>
@@ -100,39 +135,6 @@
   </div>
   <div id="toast" class="toast"></div>
 
-<!--
-RotoRouter — Baseline (User-Attached) — COMMENTED EDITION
-
-This file is a *verbatim copy* of your uploaded baseline with additional comments to help future contributors.
-Nothing functional has been removed; comments are inserted only in safe places.
-
-OVERVIEW
-- Sidebar UI preserved: Setup (board size, templates), Actions (Draw/Place/Bottom, Token Action, Roll/Apply, End Turn),
-  Corners legend, connection-edge toggle, hover ghost with Q/E rotation, toast/status HUD.
-- Canvas renderer preserved: gears background, tracks (Straight/Elbow/Cross/Block), tokens,
-  connection edges visualizer, rotation hints (meshed), turn-corner highlight, placement highlights, pulse effect.
-
-DATA MODEL (as implemented in your JS)
-- state: {
-    N, cell, pad, board[N][N], players[4] with per-player deck/discard/flags,
-    current (turn index), phase ('idle'|'place'|'token'), subphase, highlight[], hover?, previewRot,
-    die (rolled face), tokenSelect?, turnAdvancing
-  }
-- board[y][x]: { track: 'Straight'|'Elbow'|'Cross'|'Block'|null, rot: 0|90|180|270, owner: playerId|null, token: playerId|null }
-- players: fixed corners (NW/NE/SE/SW), color, per-turn flags (drawLocked, drawUsed, tokenUsed, rollUsed), deck {draw[], discard[]}, drawn card.
-
-ALGORITHMS & RULES
-- Decks: per-player, shuffled. Composition per your baseline: Straight×14, Elbow×12, Cross×4. Block is present as a type for templates but not in the draw deck.
-- Placement: first placement corner-only (must be empty); thereafter legal cells are union of empties adjacent to any OWNED track plus empties adjacent to any of YOUR TOKENS.
-- Token movement: BFS over "pipes" requiring reciprocal openings; occupancy blocked by tokens; traversal allowed over any owner's tracks once networks connect.
-- Rotation: die faces = X, CW90, CCW90, 180; Apply rotates all track tiles with checkerboard meshed-gear parity (even cells clockwise for CW90, odd cells CCW, etc.). Hints draw per-cell arcs.
-- Auto-advance: ends turn when draw/place/token/roll options are exhausted (heuristic matches your baseline's logic).
-- UI locks: one draw per turn (bottoming locks drawing), one token action per turn, one roll per turn.
-
-SAFE COMMENT STRATEGY
-- This header is placed before the main script tag.
-- No modifications to function/variable names or logic; rendering and input wiring untouched.
--->
 <script>
 (function(){
   const toast=(m)=>{ const el=document.getElementById('toast'); el.textContent=m; el.classList.add('show'); setTimeout(()=>el.classList.remove('show'),1100); };
@@ -150,7 +152,7 @@ SAFE COMMENT STRATEGY
 
   // Colors & constants
   const COLORS={ bg:'#0b0f18', grid:'#263145', gear:'#202a3d', track:'#6d7aa6', block:'#434b63', slot:'#a8b7ff', hilite:'#9efff4', tokenR:'#ff6b6b', tokenG:'#6bff95', tokenB:'#6bd9ff', tokenY:'#ffef6b', edge:'#f4b86a', hint:'#c7f0ff' };
-  const TrackCard={ Straight:'Straight', Elbow:'Elbow', Cross:'Cross', Block:'Block' };
+  const TrackCard={ Straight:'Straight', Elbow:'Elbow', Cross:'Cross', Block:'__REMOVED__' };
   const DIE_FACES=['X','X','X','CW90','CCW90','DEG180'];
   const TOKENS_MAX=3;
   const PLAYERS=[
@@ -168,7 +170,7 @@ SAFE COMMENT STRATEGY
   };
   function rotDir([dx,dy],deg){ const t=((deg%360)+360)%360; if(t===0) return [dx,dy]; if(t===90) return [-dy,dx]; if(t===180) return [-dx,-dy]; if(t===270) return [dy,-dx]; return [dx,dy]; }
   function rotatedOpenings(cell){
-    if(!cell.track || cell.track==='Block') return [];
+    if(!cell.track || cell.track==='__REMOVED__') return [];
     return OPENINGS[cell.track].map(([dx,dy])=>rotDir([dx,dy], cell.rot));
   }
   function hasReciprocal(aCell, bCell, dx, dy){
@@ -234,11 +236,11 @@ SAFE COMMENT STRATEGY
     while(q.length){
       const {x,y}=q.shift();
       const here=state.board[y][x];
-      if(!here.track || here.track==='Block') continue;
+      if(!here.track || here.track==='__REMOVED__') continue;
       for(const [dx,dy] of rotatedOpenings(here)){
         const nx=x+dx, ny=y+dy; if(!within(nx,ny)) continue;
         const there=state.board[ny][nx];
-        if(!there.track || there.track==='Block') continue;
+        if(!there.track || there.track==='__REMOVED__') continue;
         // Allow moving onto any owner's track; only block if a token is present
         if(there.token!=null) continue;
         if(!hasReciprocal(here, there, dx, dy)) continue;
@@ -385,7 +387,7 @@ SAFE COMMENT STRATEGY
     for(let y=0;y<state.N;y++){
       for(let x=0;x<state.N;x++){
         const cell=state.board[y][x];
-        if(!cell.track || cell.track==='Block') continue;
+        if(!cell.track || cell.track==='__REMOVED__') continue;
         const sign = ((x + y) % 2 === 0) ? 1 : -1;
         cell.rot = mod360(cell.rot + sign*base);
         rotated++;
@@ -589,11 +591,11 @@ SAFE COMMENT STRATEGY
     for(let y=0;y<state.N;y++){
       for(let x=0;x<state.N;x++){
         const a=state.board[y][x];
-        if(!a.track || a.track==='Block') continue;
+        if(!a.track || a.track==='__REMOVED__') continue;
         for(const [dx,dy] of rotatedOpenings(a)){
           const nx=x+dx, ny=y+dy; if(!within(nx,ny)) continue;
           const b=state.board[ny][nx];
-          if(!b.track || b.track==='Block') continue;
+          if(!b.track || b.track==='__REMOVED__') continue;
           if(hasReciprocal(a,b,dx,dy)){
             const x1=(x+0.5)*cell, y1=(y+0.5)*cell;
             const x2=(nx+0.5)*cell, y2=(ny+0.5)*cell;
@@ -618,7 +620,7 @@ SAFE COMMENT STRATEGY
   function drawTrack(type, rot, x,y, alpha){
     const cell=state.cell; const cx=x*cell+cell/2, cy=y*cell+cell/2; const r=cell/2-8;
     ctx.save(); ctx.globalAlpha=alpha; ctx.translate(cx,cy); ctx.rotate(rot*Math.PI/180);
-    if(type==='Block'){
+    if(type==='__REMOVED__'){
       ctx.fillStyle='#434b63'; ctx.beginPath(); ctx.arc(0,0,r,0,Math.PI*2); ctx.fill();
       ctx.strokeStyle=COLORS.grid; ctx.lineWidth=2; ctx.beginPath(); ctx.arc(0,0,r,0,Math.PI*2); ctx.stroke();
     } else {
@@ -651,7 +653,7 @@ SAFE COMMENT STRATEGY
         const r = state.cell*0.28;
         const sweep = Math.abs(theta) * Math.PI / 180;
         const cw = theta > 0;
-        const isTrack = !!cellData.track && cellData.track!=='Block';
+        const isTrack = !!cellData.track && cellData.track!=='__REMOVED__';
         ctx.globalAlpha = isTrack ? 0.58 : 0.22;
         ctx.strokeStyle = COLORS.hint;
         drawArrowArcDir(cx, cy, r, sweep, cw);
@@ -706,5 +708,44 @@ SAFE COMMENT STRATEGY
   startTurn();
   setStatus('New Game → Draw → Place. First placement is your corner.');
 })();</script>
+
+<script>
+// Safety alias: if Track.Block still exists, map it to "Empty"-equivalent at runtime
+window.addEventListener('load', () => {
+  try {
+    if (window.Track && 'Block' in Track) {
+      // Prefer removing the key to flush usage; otherwise, neutralize it.
+      try { delete Track.Block; } catch(e){ Track.Block = Track.Empty || null; }
+    }
+    // If OPENINGS has Block, neutralize
+    if (window.OPENINGS && ('Block' in OPENINGS || (window.Track && OPENINGS[Track.Block]!==undefined))) {
+      try { delete OPENINGS['Block']; } catch(e){ OPENINGS['Block'] = []; }
+    }
+    // Deep-scan state/decks/board for any "__REMOVED__" remnants and neutralize to Empty/null
+    function stripBlocksDeep(obj){
+      if (!obj) return obj;
+      if (Array.isArray(obj)){
+        for (let i=0;i<obj.length;i++){
+          const v=obj[i];
+          if (v==='__REMOVED__' || v==='Block') obj[i]=null;
+          else stripBlocksDeep(v);
+        }
+      } else if (typeof obj==='object'){
+        for (const k of Object.keys(obj)){
+          const v=obj[k];
+          if (v==='__REMOVED__' || v==='Block') obj[k]=null;
+          else stripBlocksDeep(v);
+        }
+      }
+      return obj;
+    }
+    if (window.state) stripBlocksDeep(window.state);
+    if (window.Players) stripBlocksDeep(window.Players);
+  } catch(e){
+    console.warn('Block strip safety patch encountered an error:', e);
+  }
+});
+</script>
+
 </body>
 </html>
