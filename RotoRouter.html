@@ -64,7 +64,8 @@
         <div class="row">
           <button class="btn" id="tokenBtn">Token Action</button>
           <span id="tokenTag" class="tag">Token: Ready</span>
-          <span id="tokenCount" class="tag">Tokens: 0/3</span>
+          <span id="tokenCount" class="tag">Token: 0/3</span>
+                    <span id="scoreTag" class="tag">Score: 0/3</span>
         </div>
         <div class="row small muted">Move along <b>any connected pipes</b> (opponent tracks allowed once networks connect). One token action/turn. Max 3 tokens/player.</div>
         <label class="toggle"><input type="checkbox" id="vizEdges"> Show connection edges</label>
@@ -78,9 +79,7 @@
         </div>
         <div class="row small muted">Meshed gears: neighbors alternate opposite direction. One roll per turn.</div>
         <hr style="border-color:#1f2636"/>
-        <div class="row"><button class="btn" id="endTurnBtn">End Turn</button>
-<button class="btn" id="saveBtn" title="Save locally">Save</button>
-<button class="btn" id="loadBtn" title="Load locally">Load</button></div>
+        <div class="row"><button class="btn" id="endTurnBtn">End Turn</button></div>
       </div>
 
       <h2>Corners</h2>
@@ -112,7 +111,7 @@
 
   // Colors & constants
   const COLORS={ bg:'#0b0f18', grid:'#263145', gear:'#202a3d', track:'#6d7aa6', block:'#434b63', slot:'#a8b7ff', hilite:'#9efff4', tokenR:'#ff6b6b', tokenG:'#6bff95', tokenB:'#6bd9ff', tokenY:'#ffef6b', edge:'#f4b86a', hint:'#c7f0ff' };
-  const TrackCard={ Straight:'Straight', Elbow:'Elbow', Cross:'Cross', Block:'Block' };
+  const TrackCard={ Straight:'Straight', Elbow:'Elbow', Cross:'Cross', RStraight:'RS', RElbow:'RE' };
   const DIE_FACES=['X','X','X','CW90','CCW90','DEG180'];
   const TOKENS_MAX=3;
   const PLAYERS=[
@@ -142,7 +141,7 @@
 
   // Utilities & state
   function shuffle(a){ for(let i=a.length-1;i>0;i--){ const j=Math.floor(Math.random()*(i+1)); [a[i],a[j]]=[a[j],a[i]]; } return a; }
-  function makeDeck(){ return { draw: shuffle([ ...Array(14).fill(TrackCard.Straight), ...Array(12).fill(TrackCard.Elbow), ...Array(4).fill(TrackCard.Cross) ]), discard: [] }; }
+  function makeDeck(){ return { draw: shuffle([ ...Array(12).fill(TrackCard.Straight), ...Array(10).fill(TrackCard.Elbow), ...Array(2).fill(TrackCard.RStraight), ...Array(2).fill(TrackCard.RElbow), ...Array(4).fill(TrackCard.Cross) ]), discard: [] }; }
   function makeBoard(N){ const b=[]; for(let y=0;y<N;y++){ const r=[]; for(let x=0;x<N;x++){ r.push({track:null,rot:0,owner:null,token:null}); } b.push(r);} return b; }
 
   const UI = {
@@ -156,9 +155,7 @@
     players:PLAYERS.map(p=>({...p, deck:makeDeck(), drawn:null, tokens:0, drawLocked:false, drawUsed:false, tokenUsed:false, rollUsed:false})),
     current:0, phase:'idle', subphase:null, highlight:[], hover:null, previewRot:0, die:null, tokenSelect:null,
     turnAdvancing:false
-  }
-window.state = state;
-;
+  };
   const canvas=UI.canvas(); const ctx=canvas.getContext('2d');
 
   function resize(){
@@ -172,7 +169,17 @@ window.state = state;
   window.addEventListener('resize', resize);
 
   function currentPlayer(){ return state.players[state.current]; }
-  function cornerFor(pid){
+  
+function opponentCornerAt(x,y,pid){
+  for(const q of PLAYERS){
+    if(q.id===pid) continue;
+    const c = cornerFor(q.id);
+    if(c.x===x && c.y===y) return q.id;
+  }
+  return null;
+}
+
+function cornerFor(pid){
     const N=state.N; const p=PLAYERS[pid].pocket;
     if(p==='NW') return {x:0,y:0}; if(p==='NE') return {x:N-1,y:0}; if(p==='SE') return {x:N-1,y:N-1}; return {x:0,y:N-1};
   }
@@ -219,13 +226,13 @@ window.state = state;
     state.players = PLAYERS.map(p=>({...p, deck:makeDeck(), drawn:null, tokens:0, drawLocked:false, drawUsed:false, tokenUsed:false, rollUsed:false}));
     state.current = 0;
     startTurn();
-    setStatus('New game. Draw → Place. First placement = corner only.');
-  }
+    if (Array.isArray(state.players)) for (const pl of state.players) pl.tokens = 0;
+}
 
   function startTurn(){
     const P=currentPlayer();
     P.drawLocked=false; P.drawUsed=false; P.tokenUsed=false; P.rollUsed=false;
-    state.phase='idle'; state.subphase=null; state.highlight=[]; state.hover=null; state.previewRot=0; state.die=null; state.tokenSelect=null;
+    state.phase='idle'; state.subphase=null; state.highlight=[]; state.hover=null; state.previewRot=0; state.die=null; state.tokenSelect=null; state.rotateFocus=null;
     updateHUD();
   }
 
@@ -256,13 +263,44 @@ window.state = state;
   }
 
   // Placement includes adjacency to player's tokens (even if token is on opponent tile)
-  function computePlaceHighlights(){
+  
+function connectedTrackFromCorner(pid){
+  const start = cornerFor(pid);
+  const key = (x,y)=>x+','+y;
+  const vis = new Set();
+  const comp = [];
+  const q = [];
+  if (!within(start.x,start.y)) return comp;
+  const startCell = state.board[start.y][start.x];
+  if (!startCell.track){ return comp; } // No network yet if no track at corner
+  q.push({x:start.x,y:start.y}); vis.add(key(start.x,start.y)); comp.push({x:start.x,y:start.y});
+  while(q.length){
+    const {x,y} = q.shift();
+    const here = state.board[y][x];
+    if(!here.track || here.track==='Block') continue;
+    const opens = rotatedOpenings(here);
+    for(const [dx,dy] of opens){
+      const nx=x+dx, ny=y+dy; if(!within(nx,ny)) continue;
+      const there = state.board[ny][nx];
+      if(!there.track || there.track==='Block') continue;
+      // openings must match in opposite direction
+      const reciprocal = [-dx,-dy];
+      const hasBack = rotatedOpenings(there).some(([adx,ady])=>adx===reciprocal[0] && ady===reciprocal[1]);
+      if(!hasBack) continue;
+      const k = key(nx,ny);
+      if(!vis.has(k)){ vis.add(k); q.push({x:nx,y:ny}); comp.push({x:nx,y:ny}); }
+    }
+  }
+  return comp;
+}
+function computePlaceHighlights(){
     const pid=currentPlayer().id;
     const myOwned = owned(pid);
+    const net = connectedTrackFromCorner(pid);
     const myTokens = allTokensOf(pid);
 
     // If no owned cells AND no tokens yet: only corner for first placement
-    if(myOwned.length===0 && myTokens.length===0){
+    if(myOwned.length===0 && myTokens.length===0 && net.length===0){
       const c=cornerFor(pid);
       const cell=state.board[c.y][c.x];
       state.highlight = (!cell.track && !cell.token) ? [c] : [];
@@ -270,14 +308,24 @@ window.state = state;
     }
 
     const adj = new Map();
-    // Adjacent to owned tracks
-    for(const p of myOwned){
+    /* RSRE HIGHLIGHTS */
+    const D = currentPlayer().drawn;
+    const base = baseDrawnType(D);
+    if(D===TrackCard.RStraight || D===TrackCard.RElbow){
+      for(let yy=0; yy<state.N; yy++) for(let xx=0; xx<state.N; xx++){
+        const c = state.board[yy][xx];
+        if(c.track===base && c.track!=='Block') adj.set(xx+','+yy, {x:xx,y:yy});
+      }
+    }
+    // Adjacent to tracks connected to my corner (ownership-agnostic)
+    for(const p of net){
       [[p.x+1,p.y],[p.x-1,p.y],[p.x,p.y+1],[p.x,p.y-1]].forEach(([x,y])=>{
         if(!within(x,y)) return;
         const c=state.board[y][x];
         if(!c.track && c.token==null) adj.set(x+','+y,{x,y});
       });
     }
+
     // Adjacent to any of my tokens
     for(const t of myTokens){
       [[t.x+1,t.y],[t.x-1,t.y],[t.x,t.y+1],[t.x,t.y-1]].forEach(([x,y])=>{
@@ -290,7 +338,9 @@ window.state = state;
     state.highlight = Array.from(adj.values());
   }
 
-  function placeMode(){
+  function baseDrawnType(card){ if(card===TrackCard.RStraight) return TrackCard.Straight; if(card===TrackCard.RElbow) return TrackCard.Elbow; return card; }
+
+function placeMode(){
     const P=currentPlayer();
     if(!P.drawn){ setStatus('Draw a card first.'); return; }
     state.phase='place'; state.subphase=null; computePlaceHighlights(); updateHUD(); setStatus('Placement: hover to preview, click to confirm. Rotate with Q/E.');
@@ -316,7 +366,7 @@ window.state = state;
     const corner = cornerFor(P.id);
     const cCell = state.board[corner.y][corner.x];
     const myCount = countTokens(P.id);
-    if(myCount < TOKENS_MAX && cCell.track && cCell.owner===P.id && cCell.token==null){
+    if(myCount < TOKENS_MAX && cCell.track && cCell.token==null){
       options.push(corner);
     }
     state.highlight = options;
@@ -371,7 +421,7 @@ window.state = state;
       const cCell = state.board[corner.y][corner.x];
       const myCount = countTokens(P.id);
       let hasOption = false;
-      if(myCount < TOKENS_MAX && cCell.track && cCell.owner===P.id && cCell.token==null){ hasOption = true; }
+      if(myCount < TOKENS_MAX && cCell.track && cCell.token==null){ hasOption = true; }
       if(!hasOption){
         for(const t of myTokens){
           if(reachableFrom(t).length>0){ hasOption=true; break; }
@@ -403,11 +453,33 @@ window.state = state;
 
     // PLACE phase
     if(state.phase==='place'){
-      const legal = state.highlight.some(h=>h.x===x&&h.y===y);
-      if(!legal){ toast('Not a legal cell'); return; }
-      const P=currentPlayer(); const cell=state.board[y][x];
-      if(cell.track){ toast('Cell occupied'); return; }
-      cell.track=P.drawn; cell.rot=state.previewRot; cell.owner=P.id; P.deck.discard.push(P.drawn); P.drawn=null;
+  const legal = state.highlight.some(h=>h.x===x&&h.y===y);
+  if(!legal){ toast('Not a legal cell'); return; }
+  const P=currentPlayer(); const cell=state.board[y][x];
+  // RS/RE: if we're in rotateExisting subphase and clicked the same cell, commit rotation BEFORE occupancy checks
+  if(state.subphase==='rotateExisting' && state.rotateFocus && state.rotateFocus.x===x && state.rotateFocus.y===y){
+    cell.rot = mod360(state.previewRot || cell.rot);
+    P.deck.discard.push(P.drawn); P.drawn=null;
+    state.subphase=null; state.rotateFocus=null; state.previewRot=0;
+    pulse(x,y);
+    state.phase='idle'; state.highlight=[]; state.hover=null; render(); updateHUD(); setStatus('Rotation applied.'); maybeAutoAdvance(); return;
+  }
+  // RS/RE: allow rotating existing same-type track
+  if(cell.track && (P.drawn===TrackCard.RStraight || P.drawn===TrackCard.RElbow)){
+    const base = baseDrawnType(P.drawn);
+    if(cell.track===base){
+      state.subphase='rotateExisting';
+      state.rotateFocus = {x,y, original: cell.rot};
+      state.previewRot = cell.rot;
+      state.hover = {x,y};
+      setStatus('Rotating '+base+': use Q/E to rotate; click again to confirm or click an empty highlighted cell to place new.');
+      render();
+      return;
+    }
+  }
+  if(cell.track){ toast('Cell occupied'); return; }
+if(state.rotateFocus){ const rf=state.rotateFocus; const cc=state.board[rf.y][rf.x]; cc.rot=rf.original; state.rotateFocus=null; state.subphase=null; }
+      cell.track=baseDrawnType(P.drawn); cell.rot=state.previewRot; cell.owner=P.id; P.deck.discard.push(P.drawn); P.drawn=null;
       pulse(x,y);
       state.phase='idle'; state.highlight=[]; state.hover=null; updateHUD(); setStatus('Placed. You cannot draw again this turn.');
       maybeAutoAdvance();
@@ -436,7 +508,7 @@ window.state = state;
           const cCell = state.board[corner.y][corner.x];
           const myCount = countTokens(P.id);
           if(myCount >= TOKENS_MAX){ toast('You already have the maximum of 3 tokens.'); return; }
-          if(!(cCell.track && cCell.owner===P.id && cCell.token==null)){ toast('Corner must have your track and be open.'); return; }
+          if(!(cCell.track && (cCell.token==null))){ toast('Corner must have a track and be open.'); return; }
           cCell.token = P.id; state.players[P.id].tokens = myCount+1;
           P.tokenUsed = true; tokenTag().textContent='Token: Used'; btn('tokenBtn').disabled = true;
           state.phase='idle'; state.subphase=null; state.highlight=[]; state.tokenSelect=null; setStatus('New token placed at your corner.'); render(); updateHUD();
@@ -450,7 +522,22 @@ window.state = state;
         const from = state.tokenSelect;
         state.board[from.y][from.x].token=null;
         state.board[y][x].token=currentPlayer().id;
-        currentPlayer().tokenUsed = true; tokenTag().textContent='Token: Used'; btn('tokenBtn').disabled = true;
+        
+// Scoring: if placed onto an opponent's corner, increment score and remove the token
+(() => {
+  const P = currentPlayer();
+  const oppId = opponentCornerAt(x,y,P.id);
+  if (oppId != null){
+    if (!P.reached) P.reached = new Set();
+    const oppName = PLAYERS[oppId].name;
+    P.reached.add(oppName);
+    state.board[y][x].token = null;
+    setStatus(P.name + ' scored at ' + oppName + "'s corner!");
+  } else {
+    setStatus('Token moved.');
+  }
+})();
+currentPlayer().tokenUsed = true; tokenTag().textContent='Token: Used'; btn('tokenBtn').disabled = true;
         state.phase='idle'; state.subphase=null; state.highlight=[]; state.tokenSelect=null; setStatus('Token moved.'); render(); updateHUD();
         maybeAutoAdvance();
         return;
@@ -487,7 +574,14 @@ window.state = state;
     btn('tokenBtn').disabled = !!P.tokenUsed;
     btn('rollBtn').disabled = !!P.rollUsed;
     tokenTag().textContent = 'Token: ' + (P.tokenUsed ? 'Used' : 'Ready');
-    tokenCount().textContent = 'Tokens: ' + countTokens(P.id) + '/' + TOKENS_MAX;
+    document.getElementById('tokenCount').textContent = 'Token: ' + ((state.players[P.id] && state.players[P.id].tokens) ? state.players[P.id].tokens : 0) + '/' + TOKENS_MAX;
+    (function(){
+      const el = document.getElementById('scoreTag');
+      if(!el){ return; }
+      const reached = P.reached ? P.reached : new Set();
+      const list = (reached && reached.size) ? Array.from(reached).map(n=>n[0]).join(', ') : '';
+      el.textContent = 'Score: ' + (reached ? reached.size : 0) + '/3' + (list?(' ['+list+']'):'');
+    })();
     if(!P.drawn && !P.drawLocked && !P.drawUsed){ btn('drawBtn').disabled = false; }
     render();
   }
@@ -525,7 +619,7 @@ window.state = state;
     if(state.phase==='place' && state.hover && P.drawn){
       const {x,y}=state.hover;
       const legal=state.highlight.some(h=>h.x===x&&h.y===y);
-      if(legal) drawTrack(P.drawn, state.previewRot, x,y,0.55);
+      if(legal) drawTrack(baseDrawnType(P.drawn), state.previewRot, x,y,0.55);
     }
     ctx.restore();
   }
@@ -670,143 +764,10 @@ window.state = state;
   startTurn();
   setStatus('New Game → Draw → Place. First placement is your corner.');
 })();</script>
-
-<!-- === Runtime Patch: UI + HUD guards + Save/Load + Autostart === -->
-
-
-
 <script>
-// Ensure module-scoped `state` is visible to Save/Load.
-(function(){
-  try{
-    if (typeof newGame === 'function'){
-      const __origNewGame = newGame;
-      newGame = function(){
-        const r = __origNewGame.apply(this, arguments);
-        try{ if (typeof state !== 'undefined') window.state = state; }catch(e){}
-        return r;
-      };
-    }
-    if (typeof startTurn === 'function'){
-      const __origStartTurn = startTurn;
-      startTurn = function(){
-        const r = __origStartTurn.apply(this, arguments);
-        try{ if (typeof state !== 'undefined') window.state = state; }catch(e){}
-        return r;
-      };
-    }
-  }catch(e){ console.warn('State bridge wrapper failed', e); }
-})();
+document.addEventListener('DOMContentLoaded', function(){
+  try { if (typeof newGame === 'function') newGame(); } catch(e){ console.error(e); }
+});
 </script>
-
-
-<script>
-// === Local Save / Load (clean single module) ===
-(function(){
-  const KEY = 'RotoRouterSaveV1';
-
-  function runtimeState(){
-    if (typeof window !== 'undefined' && window.state) return window.state;
-    if (typeof state !== 'undefined') return state;
-    return null;
-  }
-
-  function runtimePlayers(S){
-    if (S && Array.isArray(S.players) && S.players.length) return S.players;
-    if (Array.isArray(window.PLAYERS)) return window.PLAYERS;
-    return [];
-  }
-
-  function snapshot(){
-    const S = runtimeState();
-    if (!S || !S.board || !Array.isArray(S.board)) throw new Error('state/board missing');
-    const board = S.board.map(row => row.map(c => ({
-      track: c.track ?? null,
-      rot:   c.rot   ?? 0,
-      owner: c.owner ?? null,
-      token: (c.token != null ? c.token : null)
-    })));
-    const P = runtimePlayers(S);
-    const players = P.map(p => ({
-      id: p.id, name: p.name, color: p.color, pocket: p.pocket,
-      deck: { draw:[...(p.deck?.draw || [])], discard:[...(p.deck?.discard || [])] },
-      drawn: ('drawn' in p) ? p.drawn : null,
-      tokenUsed: !!p.tokenUsed, drawUsed: !!p.drawUsed, rollUsed: !!p.rollUsed,
-      reached: Array.from(p.reached || [])
-    }));
-    return { v:1, N:S.N, current:S.current, board, players, phase:S.phase, subphase:S.subphase, previewRot:S.previewRot || 0 };
-  }
-
-  function apply(snap){
-    const S = runtimeState();
-    if (!S) throw new Error('state missing');
-    S.N = snap.N; S.current = snap.current ?? 0;
-    // Rebuild board
-    S.board = Array.from({length:S.N}, (_,y)=>Array.from({length:S.N}, (_,x)=>({track:null,rot:0,owner:null,token:null})));
-    for(let y=0;y<S.N;y++){
-      for(let x=0;x<S.N;x++){
-        const c = (snap.board?.[y]?.[x]) || {};
-        const cell = S.board[y][x];
-        cell.track = c.track ?? null;
-        cell.rot   = c.rot   ?? 0;
-        cell.owner = (c.owner != null ? c.owner : null);
-        cell.token = (c.token != null ? c.token : null);
-      }
-    }
-    // Players
-    const base = Array.isArray(window.PLAYERS) ? window.PLAYERS : [];
-    S.players = (snap.players || []).map(sp => {
-      const bp = base.find(b => b.id === sp.id) || sp;
-      return {
-        id: sp.id, name: bp.name, color: bp.color, pocket: bp.pocket,
-        deck: { draw:[...(sp.deck?.draw || [])], discard:[...(sp.deck?.discard || [])] },
-        drawn: sp.drawn ?? null,
-        tokenUsed: !!sp.tokenUsed, drawUsed: !!sp.drawUsed, rollUsed: !!sp.rollUsed,
-        reached: new Set(sp.reached || [])
-      };
-    });
-    // Mirror reached back to base
-    for (const sp of (snap.players || [])){
-      const bp = base.find(b => b.id === sp.id);
-      if (bp) bp.reached = new Set(sp.reached || []);
-    }
-    // Clear transients and render
-    S.highlight=[]; S.hover=null; S.rotatePick=null; S.selectToken=null;
-    if (typeof resize === 'function') resize();
-    if (typeof render === 'function') render();
-    if (typeof updateHUD === 'function') updateHUD();
-    if (typeof setStatus === 'function') setStatus('Loaded from this device.');
-  }
-
-  function doSave(){
-    try {
-      const snap = snapshot();
-      localStorage.setItem(KEY, JSON.stringify(snap));
-      if (typeof setStatus === 'function') setStatus('Game saved to this device.');
-    } catch (e) {
-      console.error(e);
-      if (typeof setStatus === 'function') setStatus('Save failed.');
-    }
-  }
-
-  function doLoad(){
-    const raw = localStorage.getItem(KEY);
-    console.log('RR: doLoad invoked, raw?', !!raw);
-    if (!raw){ if (typeof setStatus==='function') setStatus('No saved game found.'); return; }
-    let snap=null;
-    try { snap = JSON.parse(raw); } catch (e) { console.error(e); if (setStatus) setStatus('Bad save data.'); return; }
-    if (!snap || snap.v !== 1){ if (typeof setStatus==='function') setStatus('Unsupported save format.'); return; }
-    apply(snap);
-  }
-
-  // Wire up buttons (next to End Turn)
-  try { document.getElementById('saveBtn')?.addEventListener('click', doSave); } catch (e) {}
-  try { document.getElementById('loadBtn')?.addEventListener('click', doLoad); } catch (e) {}
-
-  // Expose for console testing
-  window.RR_SAVE = doSave; window.RR_LOAD = doLoad;
-})();
-</script>
-
 </body>
 </html>
