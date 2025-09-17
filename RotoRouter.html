@@ -318,7 +318,9 @@ function computePlaceHighlights(){
       }
     }
     // Adjacent to tracks connected to my corner (ownership-agnostic)
-    for(const p of net){
+    //for(const p of net){
+    // Adjacent to all owned tracks (not just corner-connected)
+    for (const p of myOwned){
       [[p.x+1,p.y],[p.x-1,p.y],[p.x,p.y+1],[p.x,p.y-1]].forEach(([x,y])=>{
         if(!within(x,y)) return;
         const c=state.board[y][x];
@@ -457,12 +459,15 @@ function placeMode(){
   if(!legal){ toast('Not a legal cell'); return; }
   const P=currentPlayer(); const cell=state.board[y][x];
   // RS/RE: if we're in rotateExisting subphase and clicked the same cell, commit rotation BEFORE occupancy checks
+  // RS/RE confirm-first: clicked the same cell you're rotating → commit preview angle
   if(state.subphase==='rotateExisting' && state.rotateFocus && state.rotateFocus.x===x && state.rotateFocus.y===y){
     cell.rot = mod360(state.previewRot || cell.rot);
     P.deck.discard.push(P.drawn); P.drawn=null;
     state.subphase=null; state.rotateFocus=null; state.previewRot=0;
     pulse(x,y);
-    state.phase='idle'; state.highlight=[]; state.hover=null; render(); updateHUD(); setStatus('Rotation applied.'); maybeAutoAdvance(); return;
+    state.phase='idle'; state.highlight=[]; state.hover=null;
+    render(); updateHUD(); setStatus('Rotation applied.'); maybeAutoAdvance();
+    return;
   }
   // RS/RE: allow rotating existing same-type track
   if(cell.track && (P.drawn===TrackCard.RStraight || P.drawn===TrackCard.RElbow)){
@@ -545,10 +550,44 @@ currentPlayer().tokenUsed = true; tokenTag().textContent='Token: Used'; btn('tok
     }
   });
 
+  // window.addEventListener('keydown', (e)=> {
+  //   if (state.phase !== 'place') return;
+
+  //   // Block Q/E when it's RS/RE and no tile has been selected yet
+  //   const d = currentPlayer().drawn;
+  //   if ((d===TrackCard.RStraight || d===TrackCard.RElbow) && state.subphase===null) {
+  //     return;
+  //   }    
+
+  //   if(e.key==='q' || e.key==='Q'){ state.previewRot=(state.previewRot+270)%360; render(); }
+  //   if(e.key==='e' || e.key==='E'){ state.previewRot=(state.previewRot+90)%360; render(); }
+  // });
+
   window.addEventListener('keydown', (e)=>{
-    if(e.key==='q' || e.key==='Q'){ state.previewRot=(state.previewRot+270)%360; render(); }
-    if(e.key==='e' || e.key==='E'){ state.previewRot=(state.previewRot+90)%360; render(); }
-  });
+    if (state.phase !== 'place') return;             // Q/E only in Place phase
+    const k = e.key.toLowerCase();
+    if (k !== 'q' && k !== 'e') return;
+
+    // Where is the mouse?
+    const h = state.hover;
+    const hoveringEmpty = !!(h && within(h.x, h.y) && (()=>{
+      const c = state.board[h.y][h.x];
+      return !c.track && c.token == null;
+    })());
+
+    // Allow rotation if:
+    // 1) We are actively rotating an existing tile (RS/RE after click), OR
+    // 2) We are hovering an EMPTY cell (previewing a new placement)
+    if (!(state.subphase === 'rotateExisting' || hoveringEmpty)) {
+      // Optional: UI nudge when RS/RE is drawn and you're over an occupied cell
+      // const d = currentPlayer().drawn;
+      // if (d===TrackCard.RStraight || d===TrackCard.RElbow) setStatus('Click a track to rotate');
+      return;
+    }
+
+    state.previewRot = (state.previewRot + (k==='q' ? 270 : 90)) % 360;
+    render();
+  });  
 
   // Wire buttons
   btn('newGameBtn').addEventListener('click', newGame);
@@ -616,7 +655,11 @@ currentPlayer().tokenUsed = true; tokenTag().textContent='Token: Used'; btn('tok
     state.highlight.forEach(p=>{ ctx.strokeRect(p.x*cell+3, p.y*cell+3, cell-6, cell-6); });
     // ghost
     const P=currentPlayer();
-    if(state.phase==='place' && state.hover && P.drawn){
+    if(state.phase==='place' && state.subphase==='rotateExisting' && state.rotateFocus) {
+      const rf = state.rotateFocus; const c = state.board[rf.y][rf.x];
+      drawTrack(c.track, state.previewRot, rf.x, rf.y, 0.9);
+    }
+    else if(state.phase==='place' && state.hover && P.drawn){
       const {x,y}=state.hover;
       const legal=state.highlight.some(h=>h.x===x&&h.y===y);
       if(legal) drawTrack(baseDrawnType(P.drawn), state.previewRot, x,y,0.55);
