@@ -111,8 +111,8 @@
 
   // Colors & constants
   const COLORS={ bg:'#0b0f18', grid:'#263145', gear:'#202a3d', track:'#6d7aa6', block:'#434b63', slot:'#a8b7ff', hilite:'#9efff4', tokenR:'#ff6b6b', tokenG:'#6bff95', tokenB:'#6bd9ff', tokenY:'#ffef6b', edge:'#f4b86a', hint:'#c7f0ff' };
-  const TrackCard={ Straight:'Straight', Elbow:'Elbow', Cross:'Cross', RStraight:'RS', RElbow:'RE' };
-  const DIE_FACES=['X','X','X','CW90','CCW90','DEG180'];
+  const TrackCard={ Straight:'Straight', Elbow:'Elbow', Cross:'Cross', RStraight:'RS', RElbow:'RE', RCross:'RC' };
+  const DIE_FACES=['X','X','X','CW90','CW90','CCW90','CCW90','DEG180'];
   const TOKENS_MAX=3;
   const PLAYERS=[
     { id:0, name:'Red', color: COLORS.tokenR, pocket:'NW' },
@@ -141,7 +141,15 @@
 
   // Utilities & state
   function shuffle(a){ for(let i=a.length-1;i>0;i--){ const j=Math.floor(Math.random()*(i+1)); [a[i],a[j]]=[a[j],a[i]]; } return a; }
-  function makeDeck(){ return { draw: shuffle([ ...Array(12).fill(TrackCard.Straight), ...Array(10).fill(TrackCard.Elbow), ...Array(2).fill(TrackCard.RStraight), ...Array(2).fill(TrackCard.RElbow), ...Array(4).fill(TrackCard.Cross) ]), discard: [] }; }
+  //function makeDeck(){ return { draw: shuffle([ ...Array(12).fill(TrackCard.Straight), ...Array(10).fill(TrackCard.Elbow), ...Array(2).fill(TrackCard.RStraight), ...Array(2).fill(TrackCard.RElbow), ...Array(4).fill(TrackCard.Cross) ]), discard: [] }; }
+  function makeDeck(){ return { draw: shuffle([
+   ...Array(12).fill(TrackCard.Straight),
+   ...Array(10).fill(TrackCard.Elbow),
+   ...Array(2).fill(TrackCard.RStraight),
+   ...Array(2).fill(TrackCard.RElbow),
+   ...Array(2).fill(TrackCard.Cross),
+   ...Array(2).fill(TrackCard.RCross)     // ← NEW: Replaceable Cross (RC)
+  ]), discard: [] }; }
   function makeBoard(N){ const b=[]; for(let y=0;y<N;y++){ const r=[]; for(let x=0;x<N;x++){ r.push({track:null,rot:0,owner:null,token:null}); } b.push(r);} return b; }
 
   const UI = {
@@ -293,54 +301,90 @@ function connectedTrackFromCorner(pid){
   }
   return comp;
 }
+
+// Correctly compute placement highlight positions applying these rules:
+// (1) Corner-connected network (net): ownership-agnostic, so if you connect into an opponent’s tracks, their connected network is usable too.
+// (2) Owned tiles (myOwned): so you can still build from your isolated islands.
+// (3) Tokens (myTokens): already supported.
+// (4) RS/RE special: allows selecting any existing Straight/Elbow of the correct type for rotation.
 function computePlaceHighlights(){
-    const pid=currentPlayer().id;
-    const myOwned = owned(pid);
-    const net = connectedTrackFromCorner(pid);
-    const myTokens = allTokensOf(pid);
+  const pid = currentPlayer().id;
+  const myOwned = owned(pid);
+  const net = connectedTrackFromCorner(pid);
+  const myTokens = allTokensOf(pid);
 
-    // If no owned cells AND no tokens yet: only corner for first placement
-    if(myOwned.length===0 && myTokens.length===0 && net.length===0){
-      const c=cornerFor(pid);
-      const cell=state.board[c.y][c.x];
-      state.highlight = (!cell.track && !cell.token) ? [c] : [];
-      return;
-    }
-
-    const adj = new Map();
-    /* RSRE HIGHLIGHTS */
-    const D = currentPlayer().drawn;
-    const base = baseDrawnType(D);
-    if(D===TrackCard.RStraight || D===TrackCard.RElbow){
-      for(let yy=0; yy<state.N; yy++) for(let xx=0; xx<state.N; xx++){
-        const c = state.board[yy][xx];
-        if(c.track===base && c.track!=='Block') adj.set(xx+','+yy, {x:xx,y:yy});
-      }
-    }
-    // Adjacent to tracks connected to my corner (ownership-agnostic)
-    //for(const p of net){
-    // Adjacent to all owned tracks (not just corner-connected)
-    for (const p of myOwned){
-      [[p.x+1,p.y],[p.x-1,p.y],[p.x,p.y+1],[p.x,p.y-1]].forEach(([x,y])=>{
-        if(!within(x,y)) return;
-        const c=state.board[y][x];
-        if(!c.track && c.token==null) adj.set(x+','+y,{x,y});
-      });
-    }
-
-    // Adjacent to any of my tokens
-    for(const t of myTokens){
-      [[t.x+1,t.y],[t.x-1,t.y],[t.x,t.y+1],[t.x,t.y-1]].forEach(([x,y])=>{
-        if(!within(x,y)) return;
-        const c=state.board[y][x];
-        if(!c.track && c.token==null) adj.set(x+','+y,{x,y});
-      });
-    }
-
-    state.highlight = Array.from(adj.values());
+  // First placement only at corner if you have nothing yet
+  if(myOwned.length===0 && myTokens.length===0 && net.length===0){
+    const c = cornerFor(pid);
+    const cell = state.board[c.y][c.x];
+    state.highlight = (!cell.track && !cell.token) ? [c] : [];
+    return;
   }
 
-  function baseDrawnType(card){ if(card===TrackCard.RStraight) return TrackCard.Straight; if(card===TrackCard.RElbow) return TrackCard.Elbow; return card; }
+  const adj = new Map();
+
+  /* RSRE HIGHLIGHTS */
+  const D = currentPlayer().drawn;
+  const base = baseDrawnType(D);
+  if (D===TrackCard.RStraight || D===TrackCard.RElbow){
+    for(let yy=0; yy<state.N; yy++){
+      for(let xx=0; xx<state.N; xx++){
+        const c = state.board[yy][xx];
+        if(c.track===base && c.track!=='Block'){
+          adj.set(xx+','+yy, {x:xx,y:yy});
+        }
+      }
+    }
+  }
+
+  // RC (Replaceable Cross): any existing track is a valid target
+  if (D===TrackCard.RCross){
+    for(let yy=0; yy<state.N; yy++){
+      for(let xx=0; xx<state.N; xx++){
+        const c = state.board[yy][xx];
+        //if(c.track==='Cross'){ adj.set(xx+','+yy, {x:xx,y:yy}); }
+        if(c.track){ adj.set(xx+','+yy, {x:xx,y:yy}); }
+      }
+    }
+  }  
+
+  // Adjacent to tracks connected to my corner (ownership-agnostic)
+  for(const p of net){
+    [[p.x+1,p.y],[p.x-1,p.y],[p.x,p.y+1],[p.x,p.y-1]].forEach(([x,y])=>{
+      if(!within(x,y)) return;
+      const c = state.board[y][x];
+      if(!c.track && c.token==null) adj.set(x+','+y,{x,y});
+    });
+  }
+
+  // Adjacent to ANY of my owned tracks (not just corner-connected)
+  for(const p of myOwned){
+    [[p.x+1,p.y],[p.x-1,p.y],[p.x,p.y+1],[p.x,p.y-1]].forEach(([x,y])=>{
+      if(!within(x,y)) return;
+      const c = state.board[y][x];
+      if(!c.track && c.token==null) adj.set(x+','+y,{x,y});
+    });
+  }
+
+  // Adjacent to any of my tokens
+  for(const t of myTokens){
+    [[t.x+1,t.y],[t.x-1,t.y],[t.x,t.y+1],[t.x,t.y-1]].forEach(([x,y])=>{
+      if(!within(x,y)) return;
+      const c = state.board[y][x];
+      if(!c.track && c.token==null) adj.set(x+','+y,{x,y});
+    });
+  }
+
+  state.highlight = Array.from(adj.values());
+}
+
+//function baseDrawnType(card){ if(card===TrackCard.RStraight) return TrackCard.Straight; if(card===TrackCard.RElbow) return TrackCard.Elbow; return card; }
+function baseDrawnType(card){
+  if(card===TrackCard.RStraight) return TrackCard.Straight;
+  if(card===TrackCard.RElbow)   return TrackCard.Elbow;
+  if(card===TrackCard.RCross)   return TrackCard.Cross;
+  return card;
+}
 
 function placeMode(){
     const P=currentPlayer();
@@ -385,7 +429,7 @@ function placeMode(){
   function rollDie(){
     const P=currentPlayer();
     if(P.rollUsed){ setStatus('You have already rolled this turn.'); return; }
-    const r = Math.floor(Math.random()*6); state.die = DIE_FACES[r];
+    const r = Math.floor(Math.random()*DIE_FACES.length); state.die = DIE_FACES[r];
     P.rollUsed = true;
     dieTag().textContent='Die: '+state.die; rollTag().textContent='Roll: Used';
     setStatus('Die rolled: '+state.die+'. Hints show per-cell rotation. Click Apply to rotate.');
@@ -454,41 +498,73 @@ function placeMode(){
     if(x<0||y<0||x>=state.N||y>=state.N) return;
 
     // PLACE phase
-    if(state.phase==='place'){
-  const legal = state.highlight.some(h=>h.x===x&&h.y===y);
-  if(!legal){ toast('Not a legal cell'); return; }
-  const P=currentPlayer(); const cell=state.board[y][x];
-  // RS/RE: if we're in rotateExisting subphase and clicked the same cell, commit rotation BEFORE occupancy checks
-  // RS/RE confirm-first: clicked the same cell you're rotating → commit preview angle
-  if(state.subphase==='rotateExisting' && state.rotateFocus && state.rotateFocus.x===x && state.rotateFocus.y===y){
-    cell.rot = mod360(state.previewRot || cell.rot);
-    P.deck.discard.push(P.drawn); P.drawn=null;
-    state.subphase=null; state.rotateFocus=null; state.previewRot=0;
-    pulse(x,y);
-    state.phase='idle'; state.highlight=[]; state.hover=null;
-    render(); updateHUD(); setStatus('Rotation applied.'); maybeAutoAdvance();
-    return;
-  }
-  // RS/RE: allow rotating existing same-type track
-  if(cell.track && (P.drawn===TrackCard.RStraight || P.drawn===TrackCard.RElbow)){
-    const base = baseDrawnType(P.drawn);
-    if(cell.track===base){
-      state.subphase='rotateExisting';
-      state.rotateFocus = {x,y, original: cell.rot};
-      state.previewRot = cell.rot;
-      state.hover = {x,y};
-      setStatus('Rotating '+base+': use Q/E to rotate; click again to confirm or click an empty highlighted cell to place new.');
-      render();
-      return;
-    }
-  }
-  if(cell.track){ toast('Cell occupied'); return; }
-if(state.rotateFocus){ const rf=state.rotateFocus; const cc=state.board[rf.y][rf.x]; cc.rot=rf.original; state.rotateFocus=null; state.subphase=null; }
-      cell.track=baseDrawnType(P.drawn); cell.rot=state.previewRot; cell.owner=P.id; P.deck.discard.push(P.drawn); P.drawn=null;
-      pulse(x,y);
-      state.phase='idle'; state.highlight=[]; state.hover=null; updateHUD(); setStatus('Placed. You cannot draw again this turn.');
-      maybeAutoAdvance();
-      return;
+    if(state.phase==='place')
+    {
+      // RS/RE: commit rotation FIRST if we're clicking the selected tile
+      if (state.subphase==='rotateExisting'
+        && state.rotateFocus
+        && state.rotateFocus.x===x
+        && state.rotateFocus.y===y) 
+      {
+        cell.rot = mod360(state.previewRot || cell.rot);
+        P.deck.discard.push(P.drawn); P.drawn = null;
+        state.subphase = null; state.rotateFocus = null; state.previewRot = 0;
+        pulse(x,y);
+        state.phase='idle'; state.highlight=[]; state.hover=null;
+        render(); updateHUD(); setStatus('Rotation applied.'); maybeAutoAdvance();
+        return;
+      }
+
+      // For everything else, we still require the cell to be legal
+      const legal = state.highlight.some(h=>h.x===x&&h.y===y);
+      if(!legal){ toast('Not a legal cell'); return; }
+      const P=currentPlayer(); const cell=state.board[y][x];
+
+      // RC: Replaceable Cross — claim any existing track type on click
+      if (P.drawn===TrackCard.RCross && cell.track){
+        // (Rotation is irrelevant for Cross; keep current orientation or normalize to 0 if you prefer.)
+        cell.track = 'Cross';
+        cell.owner = P.id;
+        cell.rot = 0; // optional, Cross is symmetric
+        // cell.rot = 0; // optional: normalize
+        P.deck.discard.push(P.drawn); P.drawn = null;
+        pulse(x,y);
+        state.phase='idle'; state.highlight=[]; state.hover=null; state.previewRot=0;
+        render(); updateHUD(); setStatus('Track replaced with Cross (ownership changed).'); maybeAutoAdvance();
+        return;
+      }
+
+      // RS/RE: if we're in rotateExisting subphase and clicked the same cell, commit rotation BEFORE occupancy checks
+      // RS/RE confirm-first: clicked the same cell you're rotating → commit preview angle
+      if(state.subphase==='rotateExisting' && state.rotateFocus && state.rotateFocus.x===x && state.rotateFocus.y===y){
+        cell.rot = mod360(state.previewRot || cell.rot);
+        P.deck.discard.push(P.drawn); P.drawn=null;
+        state.subphase=null; state.rotateFocus=null; state.previewRot=0;
+        pulse(x,y);
+        state.phase='idle'; state.highlight=[]; state.hover=null;
+        render(); updateHUD(); setStatus('Rotation applied.'); maybeAutoAdvance();
+        return;
+      }
+      // RS/RE: allow rotating existing same-type track
+      if(cell.track && (P.drawn===TrackCard.RStraight || P.drawn===TrackCard.RElbow)){
+        const base = baseDrawnType(P.drawn);
+        if(cell.track===base){
+          state.subphase='rotateExisting';
+          state.rotateFocus = {x,y, original: cell.rot};
+          state.previewRot = cell.rot;
+          state.hover = {x,y};
+          setStatus('Rotating '+base+': use Q/E to rotate; click again to confirm or click an empty highlighted cell to place new.');
+          render();
+          return;
+        }
+      }
+      if(cell.track){ toast('Cell occupied'); return; }
+      if(state.rotateFocus){ const rf=state.rotateFocus; const cc=state.board[rf.y][rf.x]; cc.rot=rf.original; state.rotateFocus=null; state.subphase=null; }
+          cell.track=baseDrawnType(P.drawn); cell.rot=state.previewRot; cell.owner=P.id; P.deck.discard.push(P.drawn); P.drawn=null;
+          pulse(x,y);
+          state.phase='idle'; state.highlight=[]; state.hover=null; updateHUD(); setStatus('Placed. You cannot draw again this turn.');
+          maybeAutoAdvance();
+          return;
     }
 
     // TOKEN phase
@@ -499,12 +575,28 @@ if(state.rotateFocus){ const rf=state.rotateFocus; const cc=state.board[rf.y][rf
         if(isMine){
           const from = {x,y};
           const moves = reachableFrom(from);
-          if(moves.length===0){
-            setStatus('No connected destinations from that token. Auto-advancing…');
-            state.phase='idle'; state.highlight=[]; render();
-            endTurn();
+          // if(moves.length===0){
+          //   setStatus('No connected destinations from that token. Auto-advancing…');
+          //   state.phase='idle'; state.highlight=[]; render();
+          //   endTurn();
+          //   return;
+          // }
+          if (moves.length===0) {
+            // Stay on this player's turn: warn, and keep selection active.
+            setStatus('That token is stuck (no connected destinations). Choose a different token or click End Turn.');
+            toast('Token cannot move');
+
+            // Re-highlight only tokens that CAN move (plus corner, if eligible).
+            const movable = allTokensOf(P.id).filter(t => reachableFrom(t).length > 0);
+            const corner = cornerFor(P.id);
+            const cCell  = state.board[corner.y][corner.x];
+            const canPlace = countTokens(P.id) < TOKENS_MAX && cCell.track && cCell.token == null;
+
+            state.tokenSelect = null;               // remain in subphase='select'
+            state.highlight   = canPlace ? [...movable, corner] : movable;
+            render();
             return;
-          }
+          }          
           state.tokenSelect = from; state.highlight = moves; state.subphase='target';
           setStatus('Token: choose a connected destination (pipes may traverse opponents).'); render(); return;
         }
@@ -659,7 +751,8 @@ currentPlayer().tokenUsed = true; tokenTag().textContent='Token: Used'; btn('tok
       const rf = state.rotateFocus; const c = state.board[rf.y][rf.x];
       drawTrack(c.track, state.previewRot, rf.x, rf.y, 0.9);
     }
-    else if(state.phase==='place' && state.hover && P.drawn){
+    //else if(state.phase==='place' && state.hover && P.drawn){
+    else if(state.phase==='place' && state.hover && P.drawn && P.drawn!==TrackCard.RCross){
       const {x,y}=state.hover;
       const legal=state.highlight.some(h=>h.x===x&&h.y===y);
       if(legal) drawTrack(baseDrawnType(P.drawn), state.previewRot, x,y,0.55);
