@@ -24,6 +24,10 @@
     .toast { position: fixed; left: 380px; bottom: 16px; background: #182031; border: 1px solid #2b3650; padding: 10px 14px; border-radius: 10px; pointer-events: none; opacity: 0; transition: opacity .18s ease; }
     .toast.show { opacity: 1; }
     label.toggle { display:flex; align-items:center; gap:8px; font-size:12px; user-select:none; }
+    .warn {
+      color: #c00;       /* red text */
+      font-weight: 600;  /* bold */
+    }
   </style>
 </head>
 <body>
@@ -64,8 +68,9 @@
         <div class="row">
           <button class="btn" id="tokenBtn">Token Action</button>
           <span id="tokenTag" class="tag">Token: Ready</span>
+          <span id="skippedTag" class="tag">Skipped: 0/3</span>
           <span id="tokenCount" class="tag">Token: 0/3</span>
-                    <span id="scoreTag" class="tag">Score: 0/3</span>
+          <span id="scoreTag" class="tag">Score: 0/3</span>
         </div>
         <div class="row small muted">Move along <b>any connected pipes</b> (opponent tracks allowed once networks connect). One token action/turn. Max 3 tokens/player.</div>
         <label class="toggle"><input type="checkbox" id="vizEdges"> Show connection edges</label>
@@ -160,7 +165,7 @@
   };
 
   const state={ N:9, cell:64, pad:20, board:makeBoard(9),
-    players:PLAYERS.map(p=>({...p, deck:makeDeck(), drawn:null, tokens:0, drawLocked:false, drawUsed:false, tokenUsed:false, rollUsed:false})),
+    players:PLAYERS.map(p=>({...p, deck:makeDeck(), drawn:null, tokens:0, drawLocked:false, drawUsed:false, tokenUsed:false, rollUsed:false, skipCount: 0})),
     current:0, phase:'idle', subphase:null, highlight:[], hover:null, previewRot:0, die:null, tokenSelect:null,
     turnAdvancing:false
   };
@@ -231,11 +236,11 @@ function cornerFor(pid){
   function newGame(){
     state.N = parseInt(UI.boardSize().value,10);
     state.board = makeBoard(state.N);
-    state.players = PLAYERS.map(p=>({...p, deck:makeDeck(), drawn:null, tokens:0, drawLocked:false, drawUsed:false, tokenUsed:false, rollUsed:false}));
+    state.players = PLAYERS.map(p=>({...p, deck:makeDeck(), drawn:null, tokens:0, drawLocked:false, drawUsed:false, tokenUsed:false, rollUsed:false, skipCount: 0 }));
     state.current = 0;
     startTurn();
     if (Array.isArray(state.players)) for (const pl of state.players) pl.tokens = 0;
-}
+  }
 
   function startTurn(){
     const P=currentPlayer();
@@ -245,6 +250,12 @@ function cornerFor(pid){
   }
 
   function endTurnImmediate(){
+    // If the ending player is still holding a track card, count as a skip
+    const endingP = state.players[state.current];
+    if (endingP.drawn && isTrackCard(endingP.drawn)) {
+      endingP.skipCount++;
+    }
+
     state.current=(state.current+1)%state.players.length;
     startTurn();
     setStatus('Turn passed.');
@@ -386,6 +397,11 @@ function baseDrawnType(card){
   return card;
 }
 
+function isTrackCard(card){
+  return [TrackCard.Straight, TrackCard.Elbow, TrackCard.Cross,
+          TrackCard.RStraight, TrackCard.RElbow, TrackCard.RCross].includes(card);
+}
+
 function placeMode(){
     const P=currentPlayer();
     if(!P.drawn){ setStatus('Draw a card first.'); return; }
@@ -395,7 +411,9 @@ function placeMode(){
     const P=currentPlayer();
     if(!P.drawn){ setStatus('Nothing to bottom.'); return; }
     P.deck.draw.push(P.drawn); P.drawn=null;
+
     P.drawLocked = true;
+    P.skipCount++;                   // ← increment on “bottom”
     state.phase='idle'; state.highlight=[]; state.hover=null;
     updateHUD(); setStatus('Bottomed. Drawing is locked until End Turn.');
     maybeAutoAdvance();
@@ -528,6 +546,7 @@ function placeMode(){
         cell.rot = 0; // optional, Cross is symmetric
         // cell.rot = 0; // optional: normalize
         P.deck.discard.push(P.drawn); P.drawn = null;
+        P.skipCount = 0;
         pulse(x,y);
         state.phase='idle'; state.highlight=[]; state.hover=null; state.previewRot=0;
         render(); updateHUD(); setStatus('Track replaced with Cross (ownership changed).'); maybeAutoAdvance();
@@ -539,6 +558,7 @@ function placeMode(){
       if(state.subphase==='rotateExisting' && state.rotateFocus && state.rotateFocus.x===x && state.rotateFocus.y===y){
         cell.rot = mod360(state.previewRot || cell.rot);
         P.deck.discard.push(P.drawn); P.drawn=null;
+        P.skipCount = 0;
         state.subphase=null; state.rotateFocus=null; state.previewRot=0;
         pulse(x,y);
         state.phase='idle'; state.highlight=[]; state.hover=null;
@@ -553,6 +573,7 @@ function placeMode(){
           state.rotateFocus = {x,y, original: cell.rot};
           state.previewRot = cell.rot;
           state.hover = {x,y};
+          state.highlight = [];  // avoid gating the confirm click on highlights
           setStatus('Rotating '+base+': use Q/E to rotate; click again to confirm or click an empty highlighted cell to place new.');
           render();
           return;
@@ -560,7 +581,9 @@ function placeMode(){
       }
       if(cell.track){ toast('Cell occupied'); return; }
       if(state.rotateFocus){ const rf=state.rotateFocus; const cc=state.board[rf.y][rf.x]; cc.rot=rf.original; state.rotateFocus=null; state.subphase=null; }
-          cell.track=baseDrawnType(P.drawn); cell.rot=state.previewRot; cell.owner=P.id; P.deck.discard.push(P.drawn); P.drawn=null;
+          cell.track=baseDrawnType(P.drawn); cell.rot=state.previewRot; cell.owner=P.id;
+          P.deck.discard.push(P.drawn); P.drawn=null;
+          P.skipCount = 0;
           pulse(x,y);
           state.phase='idle'; state.highlight=[]; state.hover=null; updateHUD(); setStatus('Placed. You cannot draw again this turn.');
           maybeAutoAdvance();
@@ -694,6 +717,12 @@ currentPlayer().tokenUsed = true; tokenTag().textContent='Token: Used'; btn('tok
 
   function updateHUD(){
     const P=currentPlayer();
+    if (P.drawn && (P.drawn===TrackCard.Straight || P.drawn===TrackCard.Elbow ||
+        P.drawn===TrackCard.Cross || P.drawn===TrackCard.RStraight ||
+        P.drawn===TrackCard.RElbow || P.drawn===TrackCard.RCross)) {
+      setStatus(`Skipped: ${P.skipCount}/3`);
+    }
+
     turnTag().textContent='Turn: '+P.name+' ('+P.pocket+')';
     phaseTag().textContent='Phase: '+state.phase;
     drawnTag().textContent='Card: '+(P.drawn || '—');
@@ -706,6 +735,21 @@ currentPlayer().tokenUsed = true; tokenTag().textContent='Token: Used'; btn('tok
     btn('rollBtn').disabled = !!P.rollUsed;
     tokenTag().textContent = 'Token: ' + (P.tokenUsed ? 'Used' : 'Ready');
     document.getElementById('tokenCount').textContent = 'Token: ' + ((state.players[P.id] && state.players[P.id].tokens) ? state.players[P.id].tokens : 0) + '/' + TOKENS_MAX;
+
+    (function(){
+      const el = document.getElementById('skippedTag');
+      if(!el){ return; }
+      const P = currentPlayer();
+      const count = (P && P.skipCount) ? P.skipCount : 0;
+      el.textContent = 'Skipped: ' + count + '/3';
+      // Visual warning when max skips reached
+      if (count >= 3) {
+        el.classList.add('warn');   // <- requires CSS for .warn
+      } else {
+        el.classList.remove('warn');
+      }
+    })();
+
     (function(){
       const el = document.getElementById('scoreTag');
       if(!el){ return; }
