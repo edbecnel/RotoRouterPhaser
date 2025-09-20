@@ -84,7 +84,8 @@
         </div>
         <div class="row small muted">Meshed gears: neighbors alternate opposite direction. One roll per turn.</div>
         <hr style="border-color:#1f2636"/>
-        <div class="row"><button class="btn" id="endTurnBtn">End Turn</button></div>
+        <div class="row"><button class="btn" id="endTurnBtn">End Turn</button>
+        <button id="overrideBtn" style="display:none;">Override</button></div>
       </div>
 
       <h2>Corners</h2>
@@ -166,7 +167,7 @@
 
   const state={ N:9, cell:64, pad:20, board:makeBoard(9),
     players:PLAYERS.map(p=>({...p, deck:makeDeck(), drawn:null, tokens:0, drawLocked:false, drawUsed:false, tokenUsed:false, rollUsed:false, skipCount: 0})),
-    current:0, phase:'idle', subphase:null, highlight:[], hover:null, previewRot:0, die:null, tokenSelect:null,
+    current:0, phase:'idle', subphase:null, highlight:[], hover:null, forcePlace:false, previewRot:0, die:null, tokenSelect:null,
     turnAdvancing:false
   };
   const canvas=UI.canvas(); const ctx=canvas.getContext('2d');
@@ -246,6 +247,7 @@ function cornerFor(pid){
     const P=currentPlayer();
     P.drawLocked=false; P.drawUsed=false; P.tokenUsed=false; P.rollUsed=false;
     state.phase='idle'; state.subphase=null; state.highlight=[]; state.hover=null; state.previewRot=0; state.die=null; state.tokenSelect=null; state.rotateFocus=null;
+    checkForcePlace();
     updateHUD();
   }
 
@@ -402,6 +404,15 @@ function isTrackCard(card){
           TrackCard.RStraight, TrackCard.RElbow, TrackCard.RCross].includes(card);
 }
 
+function checkForcePlace(){
+  const P = currentPlayer();
+  state.forcePlace = (P.skipCount >= 3);
+  // If forced and no card in hand, allow drawing even if bottom locked
+  if (state.forcePlace && !P.drawn) {
+    P.drawLocked = false;
+  }
+}
+
 function placeMode(){
     const P=currentPlayer();
     if(!P.drawn){ setStatus('Draw a card first.'); return; }
@@ -416,6 +427,7 @@ function placeMode(){
     P.skipCount++;                   // ← increment on “bottom”
     state.phase='idle'; state.highlight=[]; state.hover=null;
     updateHUD(); setStatus('Bottomed. Drawing is locked until End Turn.');
+    checkForcePlace();
     maybeAutoAdvance();
   }
 
@@ -547,6 +559,7 @@ function placeMode(){
         // cell.rot = 0; // optional: normalize
         P.deck.discard.push(P.drawn); P.drawn = null;
         P.skipCount = 0;
+        state.forcePlace = false;   // placing satisfies the force rule
         pulse(x,y);
         state.phase='idle'; state.highlight=[]; state.hover=null; state.previewRot=0;
         render(); updateHUD(); setStatus('Track replaced with Cross (ownership changed).'); maybeAutoAdvance();
@@ -559,6 +572,7 @@ function placeMode(){
         cell.rot = mod360(state.previewRot || cell.rot);
         P.deck.discard.push(P.drawn); P.drawn=null;
         P.skipCount = 0;
+        state.forcePlace = false;   // placing satisfies the force rule
         state.subphase=null; state.rotateFocus=null; state.previewRot=0;
         pulse(x,y);
         state.phase='idle'; state.highlight=[]; state.hover=null;
@@ -584,6 +598,7 @@ function placeMode(){
           cell.track=baseDrawnType(P.drawn); cell.rot=state.previewRot; cell.owner=P.id;
           P.deck.discard.push(P.drawn); P.drawn=null;
           P.skipCount = 0;
+          state.forcePlace = false;   // placing satisfies the force rule
           pulse(x,y);
           state.phase='idle'; state.highlight=[]; state.hover=null; updateHUD(); setStatus('Placed. You cannot draw again this turn.');
           maybeAutoAdvance();
@@ -709,7 +724,15 @@ currentPlayer().tokenUsed = true; tokenTag().textContent='Token: Used'; btn('tok
   btn('drawBtn').addEventListener('click', drawCard);
   btn('placeBtn').addEventListener('click', placeMode);
   btn('bottomBtn').addEventListener('click', bottomCard);
-  btn('endTurnBtn').addEventListener('click', endTurn);
+  const endTurnBtn = document.getElementById('endTurnBtn');
+  endTurnBtn.addEventListener('click', endTurn);
+  const overrideBtn = document.getElementById('overrideBtn');
+  overrideBtn.addEventListener('click', ()=>{
+    state.forcePlace = false;
+    endTurnBtn.disabled = false;
+    overrideBtn.style.display = 'none';
+    toast('Override used: End Turn enabled.');
+  });
   btn('tokenBtn').addEventListener('click', tokenMode);
   btn('rollBtn').addEventListener('click', rollDie);
   btn('applyBtn').addEventListener('click', applyRotation);
@@ -740,13 +763,38 @@ currentPlayer().tokenUsed = true; tokenTag().textContent='Token: Used'; btn('tok
       const el = document.getElementById('skippedTag');
       if(!el){ return; }
       const P = currentPlayer();
-      const count = (P && P.skipCount) ? P.skipCount : 0;
-      el.textContent = 'Skipped: ' + count + '/3';
+      const skipCount = (P && P.skipCount) ? P.skipCount : 0;
+      el.textContent = 'Skipped: ' + skipCount + '/3';
       // Visual warning when max skips reached
-      if (count >= 3) {
+      if (skipCount >= 3) {
         el.classList.add('warn');   // <- requires CSS for .warn
+        el.textContent += '  ⚠ Maximum skipped';
       } else {
         el.classList.remove('warn');
+      }
+      // The following is redundant. Remove after testing.
+      // End Turn restriction when skips >= 3 and a track is in hand
+      // if (skipCount >= 3 && P.drawn && isTrackCard(P.drawn)) {
+      //   endTurnBtn.disabled = true;
+      //   overrideBtn.style.display = 'inline-block';
+      //   setStatus('Maximum track cards skipped');
+      // } else {
+      //   endTurnBtn.disabled = false;
+      //   overrideBtn.style.display = 'none';
+      // }
+      // Enforce End Turn restriction when skipCount ≥ 3
+      if (state.forcePlace) {
+        endTurnBtn.disabled = true;
+        overrideBtn.style.display = 'inline-block';
+
+        if (!P.drawn) {
+          setStatus('Maximum track cards skipped — you must Draw and Place before ending your turn (or use Override).');
+        } else {
+          setStatus('Maximum track cards skipped — you must Place your drawn track (or use Override).');
+        }
+      } else {
+        endTurnBtn.disabled = false;
+        overrideBtn.style.display = 'none';
       }
     })();
 
