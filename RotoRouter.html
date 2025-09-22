@@ -273,13 +273,15 @@ function cornerFor(pid){
   // Draw (1/turn)
   function drawCard(){
     const P=currentPlayer();
-    if(P.drawLocked){ setStatus('You bottomed this turn; drawing is locked until End Turn.'); return; }
-    if(P.drawUsed){ setStatus('You have already drawn this turn. End Turn to draw again next turn.'); return; }
+    if(P.drawLocked && !state.forcePlace){ setStatus('You bottomed this turn; drawing is locked until End Turn.'); return; }
+    if(P.drawUsed   && !state.forcePlace){ setStatus('You have already drawn this turn. End Turn to draw again next turn.'); return; }
+
     if(P.drawn){ setStatus('Already holding a card. Place or Bottom.'); return; }
     if(P.deck.draw.length===0 && P.deck.discard.length>0){ P.deck.draw=shuffle(P.deck.discard.splice(0)); }
     if(P.deck.draw.length===0){ setStatus('Deck empty.'); return; }
     P.drawn=P.deck.draw.shift();
-    P.drawUsed = true;
+    // While forced, we don't mark Draw as "Used" so the button stays enabled until a placement happens.
+    P.drawUsed = state.forcePlace ? false : true;    
     updateHUD(); setStatus(`${P.name} drew ${P.drawn}. Click Place.`);
   }
 
@@ -409,15 +411,17 @@ function checkForcePlace(){
   state.forcePlace = (P.skipCount >= 3);
   // If forced and no card in hand, allow drawing even if bottom locked
   if (state.forcePlace && !P.drawn) {
-    P.drawLocked = false;
+    P.drawLocked = false;   // unloack Draw
+    P.drawUsed   = false;   // ← keep Draw "Ready" (not "Used")
   }
 }
 
-function placeMode(){
+  function placeMode(){
     const P=currentPlayer();
     if(!P.drawn){ setStatus('Draw a card first.'); return; }
     state.phase='place'; state.subphase=null; computePlaceHighlights(); updateHUD(); setStatus('Placement: hover to preview, click to confirm. Rotate with Q/E.');
   }
+
   function bottomCard(){
     const P=currentPlayer();
     if(!P.drawn){ setStatus('Nothing to bottom.'); return; }
@@ -426,8 +430,8 @@ function placeMode(){
     P.drawLocked = true;
     P.skipCount++;                   // ← increment on “bottom”
     state.phase='idle'; state.highlight=[]; state.hover=null;
-    updateHUD(); setStatus('Bottomed. Drawing is locked until End Turn.');
     checkForcePlace();
+    updateHUD(); setStatus('Bottomed. Drawing is locked until End Turn.');
     maybeAutoAdvance();
   }
 
@@ -530,25 +534,27 @@ function placeMode(){
     // PLACE phase
     if(state.phase==='place')
     {
+      const P=currentPlayer(); 
+      const cell=state.board[y][x];      
+
       // RS/RE: commit rotation FIRST if we're clicking the selected tile
       if (state.subphase==='rotateExisting'
-        && state.rotateFocus
-        && state.rotateFocus.x===x
-        && state.rotateFocus.y===y) 
-      {
+         && state.rotateFocus
+         && state.rotateFocus.x===x
+         && state.rotateFocus.y===y) {
         cell.rot = mod360(state.previewRot || cell.rot);
         P.deck.discard.push(P.drawn); P.drawn = null;
+        P.skipCount = 0;
+        state.forcePlace = false;     // placing satisfies the force rule
         state.subphase = null; state.rotateFocus = null; state.previewRot = 0;
         pulse(x,y);
         state.phase='idle'; state.highlight=[]; state.hover=null;
         render(); updateHUD(); setStatus('Rotation applied.'); maybeAutoAdvance();
         return;
-      }
-
+     }      
       // For everything else, we still require the cell to be legal
       const legal = state.highlight.some(h=>h.x===x&&h.y===y);
       if(!legal){ toast('Not a legal cell'); return; }
-      const P=currentPlayer(); const cell=state.board[y][x];
 
       // RC: Replaceable Cross — claim any existing track type on click
       if (P.drawn===TrackCard.RCross && cell.track){
@@ -680,19 +686,6 @@ currentPlayer().tokenUsed = true; tokenTag().textContent='Token: Used'; btn('tok
     }
   });
 
-  // window.addEventListener('keydown', (e)=> {
-  //   if (state.phase !== 'place') return;
-
-  //   // Block Q/E when it's RS/RE and no tile has been selected yet
-  //   const d = currentPlayer().drawn;
-  //   if ((d===TrackCard.RStraight || d===TrackCard.RElbow) && state.subphase===null) {
-  //     return;
-  //   }    
-
-  //   if(e.key==='q' || e.key==='Q'){ state.previewRot=(state.previewRot+270)%360; render(); }
-  //   if(e.key==='e' || e.key==='E'){ state.previewRot=(state.previewRot+90)%360; render(); }
-  // });
-
   window.addEventListener('keydown', (e)=>{
     if (state.phase !== 'place') return;             // Q/E only in Place phase
     const k = e.key.toLowerCase();
@@ -750,9 +743,14 @@ currentPlayer().tokenUsed = true; tokenTag().textContent='Token: Used'; btn('tok
     phaseTag().textContent='Phase: '+state.phase;
     drawnTag().textContent='Card: '+(P.drawn || '—');
     dieTag().textContent='Die: '+(state.die || '—');
-    drawTag().textContent='Draw: '+(P.drawLocked ? 'Locked' : (P.drawUsed ? 'Used' : 'Ready'));
+    drawTag().textContent = 'Draw: ' + (
+      (state.forcePlace && !P.drawn) ? 'Ready (Forced)' :
+      (P.drawLocked ? 'Locked' : (P.drawUsed ? 'Used' : 'Ready'))
+    );    
     rollTag().textContent='Roll: '+(P.rollUsed ? 'Used' : 'Ready');
     btn('drawBtn').disabled = !!P.drawn || !!P.drawLocked || !!P.drawUsed;
+    // Disable Bottom when there's nothing to bottom, or when maximum-skips forces a draw/place
+    btn('bottomBtn').disabled = !P.drawn || state.forcePlace;    
     btn('applyBtn').disabled = !(state.die && state.die!=='X');
     btn('tokenBtn').disabled = !!P.tokenUsed;
     btn('rollBtn').disabled = !!P.rollUsed;
@@ -772,20 +770,12 @@ currentPlayer().tokenUsed = true; tokenTag().textContent='Token: Used'; btn('tok
       } else {
         el.classList.remove('warn');
       }
-      // The following is redundant. Remove after testing.
-      // End Turn restriction when skips >= 3 and a track is in hand
-      // if (skipCount >= 3 && P.drawn && isTrackCard(P.drawn)) {
-      //   endTurnBtn.disabled = true;
-      //   overrideBtn.style.display = 'inline-block';
-      //   setStatus('Maximum track cards skipped');
-      // } else {
-      //   endTurnBtn.disabled = false;
-      //   overrideBtn.style.display = 'none';
-      // }
       // Enforce End Turn restriction when skipCount ≥ 3
       if (state.forcePlace) {
         endTurnBtn.disabled = true;
-        overrideBtn.style.display = 'inline-block';
+        // overrideBtn.style.display = 'inline-block';
+        // Only show Override if there IS a track in hand; otherwise force Draw first
+        overrideBtn.style.display = P.drawn ? 'inline-block' : 'none';
 
         if (!P.drawn) {
           setStatus('Maximum track cards skipped — you must Draw and Place before ending your turn (or use Override).');
