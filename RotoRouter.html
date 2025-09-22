@@ -393,7 +393,6 @@ function computePlaceHighlights(){
   state.highlight = Array.from(adj.values());
 }
 
-//function baseDrawnType(card){ if(card===TrackCard.RStraight) return TrackCard.Straight; if(card===TrackCard.RElbow) return TrackCard.Elbow; return card; }
 function baseDrawnType(card){
   if(card===TrackCard.RStraight) return TrackCard.Straight;
   if(card===TrackCard.RElbow)   return TrackCard.Elbow;
@@ -407,6 +406,7 @@ function isTrackCard(card){
 }
 
 function checkForcePlace(){
+  // === FORCE-DRAW RULE (anchor: RR_FORCE_DRAW) ===
   const P = currentPlayer();
   state.forcePlace = (P.skipCount >= 3);
   // If forced and no card in hand, allow drawing even if bottom locked
@@ -431,7 +431,10 @@ function checkForcePlace(){
     P.skipCount++;                   // ← increment on “bottom”
     state.phase='idle'; state.highlight=[]; state.hover=null;
     checkForcePlace();
-    updateHUD(); setStatus('Bottomed. Drawing is locked until End Turn.');
+    updateHUD();
+    setStatus(state.forcePlace
+      ? 'Maximum track cards skipped — you must Draw and Place.'
+      : 'Bottomed. Drawing is locked until End Turn.');
     maybeAutoAdvance();
   }
 
@@ -572,8 +575,11 @@ function checkForcePlace(){
         return;
       }
 
-      // RS/RE: if we're in rotateExisting subphase and clicked the same cell, commit rotation BEFORE occupancy checks
-      // RS/RE confirm-first: clicked the same cell you're rotating → commit preview angle
+      // === RS/RE CONFIRM-FIRST (anchor: RR_ROTATE_CONFIRM_FIRST) ===
+      // If we're rotating an existing Straight/Elbow (state.subphase === 'rotateExisting')
+      // and the player clicks the SAME cell again, commit the preview rotation
+      // *before* any occupancy/adjacency checks. Consume the RS/RE card, clear force/skip,
+      // reset rotate state, and return early so no other place-paths run.
       if(state.subphase==='rotateExisting' && state.rotateFocus && state.rotateFocus.x===x && state.rotateFocus.y===y){
         cell.rot = mod360(state.previewRot || cell.rot);
         P.deck.discard.push(P.drawn); P.drawn=null;
@@ -686,6 +692,7 @@ currentPlayer().tokenUsed = true; tokenTag().textContent='Token: Used'; btn('tok
     }
   });
 
+  // === ROTATE PREVIEW KEYS (anchor: RR_ROTATE_KEYS) ===
   window.addEventListener('keydown', (e)=>{
     if (state.phase !== 'place') return;             // Q/E only in Place phase
     const k = e.key.toLowerCase();
@@ -749,6 +756,8 @@ currentPlayer().tokenUsed = true; tokenTag().textContent='Token: Used'; btn('tok
     );    
     rollTag().textContent='Roll: '+(P.rollUsed ? 'Used' : 'Ready');
     btn('drawBtn').disabled = !!P.drawn || !!P.drawLocked || !!P.drawUsed;
+    // Enable Place only when a track card is in hand
+    btn('placeBtn').disabled = !P.drawn;    
     // Disable Bottom when there's nothing to bottom, or when maximum-skips forces a draw/place
     btn('bottomBtn').disabled = !P.drawn || state.forcePlace;    
     btn('applyBtn').disabled = !(state.die && state.die!=='X');
