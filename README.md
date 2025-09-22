@@ -2,7 +2,7 @@
 
 **Built:** 2025-09-22
 
-This build removes all support for **Block** tracks and adds several gameplay and HUD fixes to eliminate soft-locks around the skip limit. It also introduces the **RC (Replaceable Cross)** utility card.
+This build removes all support for **Block** tracks and adds gameplay/HUD fixes to eliminate soft-locks around skip limits. It also introduces a new rule to **force the introduction of elbows** after players skip them three times.
 
 ---
 
@@ -16,30 +16,37 @@ This build removes all support for **Block** tracks and adds several gameplay an
 ## What changed (high level)
 
 - **Block tracks removed** from rules, decks, and UI (non-destructive to the rest of gameplay).
-- **Forced Draw at 3/3 skips**: after three skipped placements in a row, the player must **Draw + Place** before ending their turn.
+- **Forced Draw at 3/3 track skips**: after three skipped track placements in a row, the player must **Draw + Place** before ending their turn.
+- **NEW — Elbows Skipped (3/3) forced placement**
+  - Tracks how many times a player **skips placing an Elbow** (either by bottoming an **Elbow** or ending their turn while holding an **Elbow**).
+  - After **3** elbow skips, the player is **flagged**: the **next time they draw an Elbow**, they **must place it** that turn.
+  - While holding that Elbow under the elbow-forced state: **End Turn** and **Bottom** are **disabled**; **Place** is enabled. No override.
+  - After the Elbow is placed, the elbow skip counter resets to **0** and the elbow-forced flag clears.
 - **HUD improvements**
-  - “Skipped: x/3” counter with “⚠ Maximum skipped” at 3/3.
+  - “Skipped: x/3” counter with “⚠ Maximum skipped” at 3/3 (track placement rule).
+  - **NEW:** “Elbows Skipped: x/3” counter with “⚠ Next Elbow must be placed” at 3/3.
   - **Draw: Ready (Forced)** label appears when a player is forced to draw and has no card in hand.
 - **Button-state guards**
-  - **Draw**: enabled under forced state even if previously locked/used; never marked “Used” while forced.
-  - **Place**: **enabled only when a track card is in hand** (disabled when `!P.drawn`).
-  - **Bottom**: disabled when you **don’t** have a card **or** when you’re in the **forced-draw** state.
-  - **End Turn**: disabled while forced; **Override** only shows if a card is in hand.
+  - **Draw**: enabled under forced-draw even if previously locked/used; never marked “Used” while forced-draw.
+  - **Place**: **enabled only when a track card is in hand** (`!P.drawn` disables the button).
+  - **Bottom**: disabled when you **don’t** have a card, when **forced-draw** is active, or when **elbow-forced** is active on an Elbow in hand.
+  - **End Turn**: disabled while **forced-draw**, and also when **elbow-forced** is active on an Elbow in hand.
+  - **Override**: only visible during **forced-draw** when a card is in hand; **hidden** during **elbow-forced** (no bypass).
 - **RS/RE rotation confirm-first**: Clicking the **same** cell when using RS/RE commits the rotated angle **before** occupancy checks, ensuring the rotation “sticks.”
-- **New card – RC (Replaceable Cross)**: Replace any existing track with a Cross you own.
+- **RC (Replaceable Cross)**: Replace any existing track with a Cross you own.
 
 ---
 
 ## Detailed behavior & UX
 
-### Forced Draw (after 3/3 skips)
+### Forced Draw (after 3/3 track skips)
 
 When a player’s `skipCount ≥ 3` **and** they have **no drawn card**:
 
 - **Draw** is **enabled** and labeled **“Draw: Ready (Forced)”**.
 - **End Turn** is **disabled**.
 - **Override** is **hidden** (no card to act on yet).
-- **Bottom** is **disabled** (no card, and bottoming is irrelevant while forced).
+- **Bottom** is **disabled** (no card; bottoming is irrelevant while forced).
 - **Place** is **disabled** (no card to place).
 
 After the player **Draws** while forced:
@@ -55,6 +62,20 @@ When the player successfully **Places** (or uses RS/RE/RC to complete an action 
 - `state.forcePlace` becomes **false**.
 - Buttons/HUD return to normal for the next turn.
 
+### NEW — Elbows Skipped (3/3) forced placement
+
+- Each time a player **skips placing an Elbow** (either by **Bottom** on an **Elbow** card **or** ending the turn while **holding** an **Elbow**), increment **`elbowSkipCount`**.
+- When **`elbowSkipCount ≥ 3`**, set a **pending elbow-forced** flag for that player.
+- The **next time that player draws an Elbow**, they are **forced to place it immediately**:
+  - **End Turn** is **disabled**.
+  - **Bottom** is **disabled**.
+  - **Place** remains **enabled** (and highlights show legal cells as usual).
+  - **Override** is **hidden** (cannot bypass elbow forcing).
+- After the Elbow is successfully placed:
+  - Reset `elbowSkipCount = 0` and clear the elbow-forced flag.
+
+> Note: The elbow-forced flag **persists across turns and non-elbow draws**; it only clears once the player places an Elbow.
+
 ### RS/RE rotation confirm-first
 
 Using **RS/RE** on an existing Straight/Elbow:
@@ -69,87 +90,86 @@ Using **RS/RE** on an existing Straight/Elbow:
 - Draw **RC**, select **any existing track**.
 - On confirm, the target track is replaced by a **Cross** owned by the acting player.
 - Rotation is normalized (Cross is symmetric). Ownership transfers to the actor.
-- Forced state clears if this resolves a forced-draw turn.
+- Forced-draw clears if this resolves a forced-draw turn.
 
 ---
 
 ## Developer notes (function-level pointers)
 
-> Names below refer to functions/logic you’ll find in `RotoRouter.html`. Keep these invariants intact to prevent soft-locks.
+> Names below refer to functions/logic in `RotoRouter.html`. Keep these invariants intact.
 
-### `checkForcePlace()`
+### `checkForcePlace()` (track skips)
 - Sets `state.forcePlace = (P.skipCount >= 3)`.
 - If forced **and** **no card in hand**: clears `P.drawLocked` and `P.drawUsed` so **Draw** is usable and not marked “Used.”
-- Call this **before** rendering the HUD whenever skip count or hand state might change (e.g., at start of turn, after `bottomCard()` increments skip count).
+- Call this **before** rendering the HUD whenever skip count or hand state might change.
+
+### `checkForceElbow(P)` (elbow skips)
+- Sets `P.forceElbow = (P.elbowSkipCount >= 3)`; persists across turns.
+- Does **not** change draw locks—elbow forcing only applies when an **Elbow** is in hand.
 
 ### `bottomCard()`
-- Increments `skipCount` and sets `P.drawLocked = true` (normal path).
-- **Important ordering**: call `checkForcePlace()` **before** `updateHUD()` so forced-draw is visible immediately (label reads “Ready (Forced)”, End Turn disabled, Bottom disabled).
+- Increments `skipCount` (track rule) and, **if the bottomed card is `TrackCard.Elbow`**, increments `elbowSkipCount` and calls `checkForceElbow(P)` **before** `updateHUD()`.
+
+### `endTurnImmediate()`
+- If ending with a track card in hand, increments `skipCount` (existing behavior).
+- **NEW:** If ending with `TrackCard.Elbow` in hand, increment `elbowSkipCount` and call `checkForceElbow(P)`.
 
 ### `drawCard()`
-- Guards for `drawLocked`/`drawUsed` are **waived while forced**.
-- While forced, **do not** set `P.drawUsed = true`; keep it **false** so the HUD doesn’t show “Used” and players can proceed to place.
+- Forced-draw guards are waived while `state.forcePlace` (existing behavior).
+- **After drawing:** if `P.forceElbow` **and** `P.drawn === TrackCard.Elbow`, set a status like **“Elbows Skipped reached 3/3 — you must place this Elbow now.”**
 
 ### `updateHUD()`
 - Draw label: when `state.forcePlace && !P.drawn`, show **“Draw: Ready (Forced)”**.
 - Button states:
-  - `drawBtn`: enabled when not holding a card and not locked/used (or when forced).
-  - `placeBtn`: **disabled** when `!P.drawn` (enabled only when a card is in hand).
-  - `bottomBtn`: **disabled** when `!P.drawn || state.forcePlace`.
-  - `endTurnBtn`: **disabled** when `state.forcePlace`.
-  - `overrideBtn`: visible **only** when `state.forcePlace && P.drawn`.
+  - `drawBtn`: disabled when holding a card; else respects lock/used (or enabled during forced-draw).
+  - `placeBtn`: **disabled** when `!P.drawn`.
+  - `bottomBtn`: **disabled** when `!P.drawn || state.forcePlace || (P.forceElbow && P.drawn===TrackCard.Elbow)`.
+  - `endTurnBtn`: **disabled** when `state.forcePlace || (P.forceElbow && P.drawn===TrackCard.Elbow)`.
+  - `overrideBtn`: visible **only** when `state.forcePlace && P.drawn`; **hidden** when `P.forceElbow && P.drawn===TrackCard.Elbow`.
+- Elbow HUD tag:
+  - Update `Elbows Skipped: x/3`, and when `x ≥ 3` add **“⚠ Next Elbow must be placed”**.
 
 ### Placement/consumption paths
-- On successful placement / confirmed RS/RE / RC:
-  - Reset `P.skipCount = 0`.
-  - Clear `state.forcePlace = false`.
-  - Clear rotate/preview substate, update HUD.
+- On any successful placement / confirmed RS/RE / RC: reset `P.skipCount = 0` and clear `state.forcePlace = false` (existing behavior).
+- **Additionally:** when the placed track is an **Elbow**, reset `P.elbowSkipCount = 0` and `P.forceElbow = false`.
 
 ---
 
-## Verification scenarios (step-by-step)
+## Verification scenarios
 
-### A) Three bottoms then forced draw
-1. Turn 1 (Red): **Draw → Bottom → End Turn** → HUD shows **Skipped: 1/3**.  
-2. Turn 2 (Red): **Draw → Bottom → End Turn** → HUD shows **Skipped: 2/3**.  
-3. Turn 3 (Red): **Draw** and **End Turn** without placing → still **Skipped: 2/3**.  
-4. Turn 4 (Red, forced): **Draw** is **enabled** (**Ready (Forced)**), **End Turn** is **disabled**, **Override** is **hidden**, **Bottom** is **disabled**, **Place** is **disabled**.  
-5. **Draw** a card: **Override** becomes **visible**; **Place** becomes **enabled**; **End Turn** still **disabled**.  
-6. **Place** the card (or use RS/RE/RC) → force clears, next turn is normal.
+### A) Hitting the elbow threshold with Bottom
+1. Turn 1 (Red): Draw **Elbow** → **Bottom** → **Elbows Skipped: 1/3**.  
+2. Turn 2 (Red): Draw **Elbow** → **Bottom** → **Elbows Skipped: 2/3**.  
+3. Turn 3 (Red): Draw **Elbow** → **Bottom** → **Elbows Skipped: 3/3 ⚠ Next Elbow must be placed**.  
+4. Later, when Red next draws an **Elbow**: **End Turn/Bottom disabled**, **Place enabled** → must place Elbow; afterwards `elbowSkipCount` resets to **0**.
 
-### B) Forced state after bottoming on the third skip
-1. Turn 1 (Red): **Draw → Bottom → End Turn** → **Skipped: 1/3**.  
-2. Turn 2 (Red): **Draw → Bottom → End Turn** → **Skipped: 2/3**.  
-3. Turn 3 (Red): **Draw → Bottom** → **Skipped: 3/3 ⚠ Maximum skipped** now triggers forced state.  
-   - **Draw** becomes **enabled** with **Ready (Forced)**.  
-   - **Place** and **Bottom** are **disabled**; **End Turn** is **disabled**; **Override** hidden.  
-4. **Draw** then **Place** to clear the force.
+### B) Hitting the elbow threshold by simply skipping placement
+1. Turn 1: Draw **Elbow** → **End Turn** (keep in hand) → **Elbows Skipped: 1/3**.  
+2. Turn 2: **End Turn** again (still holding Elbow) → **Elbows Skipped: 2/3**.  
+3. Turn 3: **End Turn** again → **Elbows Skipped: 3/3 ⚠ Next Elbow must be placed**.  
+4. When Red eventually **Bottoms** or **Draws** into an **Elbow**: forced to place that Elbow.
 
-### C) RS/RE rotation confirm
-1. Draw **RS** (or **RE**).  
-2. Click an existing Straight/Elbow → press **Q/E** to set angle.  
-3. Click the **same** tile → rotation commits; card is discarded.
-
-### D) RC replacement
-1. Draw **RC**.  
-2. Hover highlights show valid track targets.  
-3. Click a target → it becomes a **Cross** owned by the current player; card is discarded.  
-4. If under forced-draw, this resolves the force.
+### C) Interaction with forced-draw (track skips)
+- If both rules are in effect simultaneously (e.g., forced-draw active and elbow-forced pending), the button guards remain consistent: **End Turn** disabled and **Bottom** disabled in both cases when the relevant condition is met.
 
 ---
 
 ## CHANGELOG
 
 ### 2025-09-22
+- **Elbows Skipped (3/3) forced placement**
+  - Count increments when an **Elbow** is bottomed **or** when a turn is ended while **holding** an **Elbow**.
+  - After 3, the next **Elbow** drawn **must be placed** that turn (no Bottom, no End Turn, no Override).
+  - Elbow counter and flag clear upon placing an Elbow.
 - **Place button behavior**
   - **Enabled only when a track card is in hand** (`!P.drawn` disables the button).
-- **Forced Draw at 3/3 skips**
+- **Forced Draw at 3/3 track skips**
   - Draw enabled with **“Ready (Forced)”** when no card in hand.
   - **End Turn** disabled while forced; **Override** hidden until a card is drawn.
   - Forced draws no longer mark Draw as “Used.”
 - **HUD/Buttons**
-  - **Bottom** disabled when `!P.drawn || state.forcePlace`.
-  - Clearer status messages when force triggers.
+  - **Bottom** disabled when `!P.drawn || state.forcePlace` (track rule) or when elbow-forced is active on an Elbow in hand.
+  - Clearer status messages when either force triggers.
 - **RS/RE Rotation**
   - Confirm-first commit of preview rotation before occupancy checks.
 - **RC (Replaceable Cross)**
@@ -168,8 +188,10 @@ Using **RS/RE** on an existing Straight/Elbow:
 ## Contributor checklist
 
 - Always call `checkForcePlace()` **before** `updateHUD()` after any action that might alter `skipCount` or hand state.
-- While forced, **allow Draw** even if previously locked/used, and **never** mark it “Used” until a placement resolves the force.
+- Track elbows via `elbowSkipCount`; call `checkForceElbow(P)` after any action that might alter it (Bottom-on-Elbow, End Turn with Elbow in hand).
+- While **forced-draw**, allow Draw even if previously locked/used, and **never** mark it “Used” until a placement resolves the force.
+- While **elbow-forced and Elbow in hand**, **disable End Turn and Bottom**; hide Override.
 - Keep **RS/RE confirm-first** logic **above** occupancy checks.
 - Keep **Place disabled** when `!P.drawn`.
-- Keep **Bottom disabled** when `!P.drawn || state.forcePlace`.
-- Only show **Override** during forced state **if** a card is in hand.
+- Keep **Bottom disabled** when `!P.drawn || state.forcePlace || (P.forceElbow && P.drawn===TrackCard.Elbow)`.
+- Only show **Override** during forced-draw **if** a card is in hand.

@@ -69,6 +69,7 @@
           <button class="btn" id="tokenBtn">Token Action</button>
           <span id="tokenTag" class="tag">Token: Ready</span>
           <span id="skippedTag" class="tag">Skipped: 0/3</span>
+          <span id="elbowSkippedTag" class="tag">Elbows Skipped: 0/3</span>
           <span id="tokenCount" class="tag">Token: 0/3</span>
           <span id="scoreTag" class="tag">Score: 0/3</span>
         </div>
@@ -166,7 +167,8 @@
   };
 
   const state={ N:9, cell:64, pad:20, board:makeBoard(9),
-    players:PLAYERS.map(p=>({...p, deck:makeDeck(), drawn:null, tokens:0, drawLocked:false, drawUsed:false, tokenUsed:false, rollUsed:false, skipCount: 0})),
+    players:PLAYERS.map(p=>({...p, deck:makeDeck(), drawn:null, tokens:0, drawLocked:false, drawUsed:false, tokenUsed:false, rollUsed:false, skipCount: 0, elbowSkipCount: 0, forceElbow: false })),
+
     current:0, phase:'idle', subphase:null, highlight:[], hover:null, forcePlace:false, previewRot:0, die:null, tokenSelect:null,
     turnAdvancing:false
   };
@@ -237,7 +239,7 @@ function cornerFor(pid){
   function newGame(){
     state.N = parseInt(UI.boardSize().value,10);
     state.board = makeBoard(state.N);
-    state.players = PLAYERS.map(p=>({...p, deck:makeDeck(), drawn:null, tokens:0, drawLocked:false, drawUsed:false, tokenUsed:false, rollUsed:false, skipCount: 0 }));
+    state.players = PLAYERS.map(p=>({...p, deck:makeDeck(), drawn:null, tokens:0, drawLocked:false, drawUsed:false, tokenUsed:false, rollUsed:false, skipCount: 0, elbowSkipCount: 0, forceElbow: false }));
     state.current = 0;
     startTurn();
     if (Array.isArray(state.players)) for (const pl of state.players) pl.tokens = 0;
@@ -257,6 +259,12 @@ function cornerFor(pid){
     if (endingP.drawn && isTrackCard(endingP.drawn)) {
       endingP.skipCount++;
     }
+
+    // If they are holding an Elbow, count an elbow-skip too
+    if (endingP.drawn === TrackCard.Elbow) {
+      endingP.elbowSkipCount++;
+      checkForceElbow(endingP);
+    }    
 
     state.current=(state.current+1)%state.players.length;
     startTurn();
@@ -282,7 +290,12 @@ function cornerFor(pid){
     P.drawn=P.deck.draw.shift();
     // While forced, we don't mark Draw as "Used" so the button stays enabled until a placement happens.
     P.drawUsed = state.forcePlace ? false : true;    
-    updateHUD(); setStatus(`${P.name} drew ${P.drawn}. Click Place.`);
+    updateHUD();
+    if (P.forceElbow && P.drawn === TrackCard.Elbow) {
+      setStatus('Elbows Skipped reached 3/3 — you must place this Elbow now.');
+    } else {
+      setStatus(`${P.name} drew ${P.drawn}. Click Place.`);
+    }
   }
 
   // Placement includes adjacency to player's tokens (even if token is on opponent tile)
@@ -416,6 +429,11 @@ function checkForcePlace(){
   }
 }
 
+function checkForceElbow(P){
+  // Set a persistent flag once the player has skipped 3 elbows.
+  P.forceElbow = (P.elbowSkipCount >= 3);
+}
+
   function placeMode(){
     const P=currentPlayer();
     if(!P.drawn){ setStatus('Draw a card first.'); return; }
@@ -425,16 +443,23 @@ function checkForcePlace(){
   function bottomCard(){
     const P=currentPlayer();
     if(!P.drawn){ setStatus('Nothing to bottom.'); return; }
-    P.deck.draw.push(P.drawn); P.drawn=null;
-
+    const bottomed = P.drawn;            // capture BEFORE clearing
+    P.deck.draw.push(bottomed);          // push once
+    P.drawn = null;                      // now clear the hand
     P.drawLocked = true;
     P.skipCount++;                   // ← increment on “bottom”
+    if (bottomed === TrackCard.Elbow) {
+      P.elbowSkipCount++;
+      checkForceElbow(P);
+    }
+
     state.phase='idle'; state.highlight=[]; state.hover=null;
     checkForcePlace();
     updateHUD();
     setStatus(state.forcePlace
       ? 'Maximum track cards skipped — you must Draw and Place.'
-      : 'Bottomed. Drawing is locked until End Turn.');
+      : (P.forceElbow ? 'Bottomed. Elbows Skipped incremented (3/3: next Elbow must be placed).' 
+                      : 'Bottomed. Drawing is locked until End Turn.'));    
     maybeAutoAdvance();
   }
 
@@ -607,10 +632,15 @@ function checkForcePlace(){
       }
       if(cell.track){ toast('Cell occupied'); return; }
       if(state.rotateFocus){ const rf=state.rotateFocus; const cc=state.board[rf.y][rf.x]; cc.rot=rf.original; state.rotateFocus=null; state.subphase=null; }
-          cell.track=baseDrawnType(P.drawn); cell.rot=state.previewRot; cell.owner=P.id;
+          const placedType = baseDrawnType(P.drawn);
+          cell.track=placedType; cell.rot=state.previewRot; cell.owner=P.id;
           P.deck.discard.push(P.drawn); P.drawn=null;
           P.skipCount = 0;
           state.forcePlace = false;   // placing satisfies the force rule
+          if (placedType === TrackCard.Elbow) {
+            P.elbowSkipCount = 0;
+            P.forceElbow = false;
+          }
           pulse(x,y);
           state.phase='idle'; state.highlight=[]; state.hover=null; updateHUD(); setStatus('Placed. You cannot draw again this turn.');
           maybeAutoAdvance();
@@ -763,6 +793,15 @@ currentPlayer().tokenUsed = true; tokenTag().textContent='Token: Used'; btn('tok
     btn('applyBtn').disabled = !(state.die && state.die!=='X');
     btn('tokenBtn').disabled = !!P.tokenUsed;
     btn('rollBtn').disabled = !!P.rollUsed;
+
+    // If the player has hit the elbow threshold and is currently holding an Elbow, force placement:
+    if (P.forceElbow && P.drawn === TrackCard.Elbow) {
+      btn('bottomBtn').disabled = true;
+      endTurnBtn.disabled = true;
+      overrideBtn.style.display = 'none'; // no bypass for elbow forcing
+      setStatus('Elbows Skipped: 3/3 — you must place this Elbow now.');
+    }
+
     tokenTag().textContent = 'Token: ' + (P.tokenUsed ? 'Used' : 'Ready');
     document.getElementById('tokenCount').textContent = 'Token: ' + ((state.players[P.id] && state.players[P.id].tokens) ? state.players[P.id].tokens : 0) + '/' + TOKENS_MAX;
 
@@ -796,6 +835,20 @@ currentPlayer().tokenUsed = true; tokenTag().textContent='Token: Used'; btn('tok
         overrideBtn.style.display = 'none';
       }
     })();
+
+    (function(){
+      const el = document.getElementById('elbowSkippedTag');
+      if(!el){ return; }
+      const P = currentPlayer();
+      const ecount = (P && P.elbowSkipCount) ? P.elbowSkipCount : 0;
+      el.textContent = 'Elbows Skipped: ' + ecount + '/3';
+      if (ecount >= 3) {
+        el.classList.add('warn');
+        el.textContent += '  ⚠ Next Elbow must be placed';
+      } else {
+        el.classList.remove('warn');
+      }
+    })();    
 
     (function(){
       const el = document.getElementById('scoreTag');
