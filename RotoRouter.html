@@ -215,7 +215,7 @@ function cornerFor(pid){
   }
 
   // BFS for token moves — move across ANY connected owner
-  function reachableFrom(start){
+  function reachableFrom(start, pid){
     const vis=new Set(); const q=[start]; const out=[];
     const key=(x,y)=>x+','+y; vis.add(key(start.x,start.y));
     while(q.length){
@@ -226,8 +226,16 @@ function cornerFor(pid){
         const nx=x+dx, ny=y+dy; if(!within(nx,ny)) continue;
         const there=state.board[ny][nx];
         if(!there.track || there.track==='Block') continue;
-        // Allow moving onto any owner's track; only block if a token is present
-        if(there.token!=null) continue;
+        // Block if a token is present, EXCEPT when it's an opponent CORNER with the owner's token on it.
+        if (there.token!=null){
+          const oppId = opponentCornerAt(nx,ny,pid); // whose corner is this (relative to mover)?
+          const ownerOnOwnCorner = (oppId!=null && there.token===oppId);
+          if (!ownerOnOwnCorner) continue;
+          // Owner-on-own-corner: treat as terminal destination (don’t enqueue further)
+          const k=key(nx,ny);
+          if(!vis.has(k)){ vis.add(k); out.push({x:nx,y:ny}); }
+          continue;
+        }        
         if(!hasReciprocal(here, there, dx, dy)) continue;
         const k=key(nx,ny); if(!vis.has(k)){ vis.add(k); q.push({x:nx,y:ny}); out.push({x:nx,y:ny}); }
       }
@@ -654,20 +662,14 @@ function checkForceElbow(P){
         const isMine = state.board[y][x].token===P.id;
         if(isMine){
           const from = {x,y};
-          const moves = reachableFrom(from);
-          // if(moves.length===0){
-          //   setStatus('No connected destinations from that token. Auto-advancing…');
-          //   state.phase='idle'; state.highlight=[]; render();
-          //   endTurn();
-          //   return;
-          // }
+          const moves = reachableFrom(from, P.id);
           if (moves.length===0) {
             // Stay on this player's turn: warn, and keep selection active.
             setStatus('That token is stuck (no connected destinations). Choose a different token or click End Turn.');
             toast('Token cannot move');
 
             // Re-highlight only tokens that CAN move (plus corner, if eligible).
-            const movable = allTokensOf(P.id).filter(t => reachableFrom(t).length > 0);
+            const movable = allTokensOf(P.id).filter(t => reachableFrom(t, P.id).length > 0);
             const corner = cornerFor(P.id);
             const cCell  = state.board[corner.y][corner.x];
             const canPlace = countTokens(P.id) < TOKENS_MAX && cCell.track && cCell.token == null;
@@ -697,27 +699,32 @@ function checkForceElbow(P){
         const legal = state.highlight.some(h=>h.x===x&&h.y===y);
         if(!legal){ toast('Pick a connected destination.'); return; }
         const from = state.tokenSelect;
-        state.board[from.y][from.x].token=null;
-        state.board[y][x].token=currentPlayer().id;
-        
-// Scoring: if placed onto an opponent's corner, increment score and remove the token
-(() => {
-  const P = currentPlayer();
-  const oppId = opponentCornerAt(x,y,P.id);
-  if (oppId != null){
-    if (!P.reached) P.reached = new Set();
-    const oppName = PLAYERS[oppId].name;
-    P.reached.add(oppName);
-    state.board[y][x].token = null;
-    setStatus(P.name + ' scored at ' + oppName + "'s corner!");
-  } else {
-    setStatus('Token moved.');
-  }
-})();
-currentPlayer().tokenUsed = true; tokenTag().textContent='Token: Used'; btn('tokenBtn').disabled = true;
-        state.phase='idle'; state.subphase=null; state.highlight=[]; state.tokenSelect=null; setStatus('Token moved.'); render(); updateHUD();
-        maybeAutoAdvance();
-        return;
+        // Scoring: if placed onto an opponent's corner, increment score and remove the token
+        (() => {
+              const P = currentPlayer();
+              const oppId = opponentCornerAt(x,y,P.id);
+              const destHasOwner = (oppId != null && state.board[y][x].token === oppId);
+              // Remove token from source
+              state.board[from.y][from.x].token = null;
+              // Only place our token if destination doesn’t already hold its owner’s token
+              if (!destHasOwner) state.board[y][x].token = P.id;
+              // Scoring: arrival on an opponent corner
+              if (oppId != null){
+                if (!P.reached) P.reached = new Set();
+                const oppName = PLAYERS[oppId].name;
+                P.reached.add(oppName);
+                // If we placed our token, remove it after scoring; otherwise leave owner token as-is
+                if (!destHasOwner) state.board[y][x].token = null;
+                setStatus(P.name + ' scored at ' + oppName + "'s corner!");
+              } else {
+                setStatus('Token moved.');
+              }
+        })();        
+
+        currentPlayer().tokenUsed = true; tokenTag().textContent='Token: Used'; btn('tokenBtn').disabled = true;
+              state.phase='idle'; state.subphase=null; state.highlight=[]; state.tokenSelect=null; setStatus('Token moved.'); render(); updateHUD();
+              maybeAutoAdvance();
+              return;
       }
     }
   });
