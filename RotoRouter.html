@@ -103,7 +103,15 @@
 
 <script>
 (function(){
-  const toast=(m)=>{ const el=document.getElementById('toast'); el.textContent=m; el.classList.add('show'); setTimeout(()=>el.classList.remove('show'),1100); };
+  // Toast with adjustable duration (defaults to ~3.5s) and proper clearing
+  let _toastTimer=null;
+  const toast=(m, ms=3500)=>{
+    const el=document.getElementById('toast');
+    el.textContent=m;
+    el.classList.add('show');
+    if(_toastTimer) clearTimeout(_toastTimer);
+    _toastTimer=setTimeout(()=>el.classList.remove('show'), ms);
+  };  
   const setStatus=(t)=>{ document.getElementById('status').innerHTML=t; };
   const tag = (id)=>document.getElementById(id);
   const turnTag=()=>tag('turnTag');
@@ -145,18 +153,27 @@
     const bOk = rotatedOpenings(bCell).some(([rx,ry])=>rx===-dx && ry===-dy);
     return bOk;
   }
-
+  
   // Utilities & state
   function shuffle(a){ for(let i=a.length-1;i>0;i--){ const j=Math.floor(Math.random()*(i+1)); [a[i],a[j]]=[a[j],a[i]]; } return a; }
-  //function makeDeck(){ return { draw: shuffle([ ...Array(12).fill(TrackCard.Straight), ...Array(10).fill(TrackCard.Elbow), ...Array(2).fill(TrackCard.RStraight), ...Array(2).fill(TrackCard.RElbow), ...Array(4).fill(TrackCard.Cross) ]), discard: [] }; }
-  function makeDeck(){ return { draw: shuffle([
-   ...Array(12).fill(TrackCard.Straight),
-   ...Array(10).fill(TrackCard.Elbow),
-   ...Array(2).fill(TrackCard.RStraight),
-   ...Array(2).fill(TrackCard.RElbow),
-   ...Array(2).fill(TrackCard.Cross),
-   ...Array(2).fill(TrackCard.RCross)     // ← NEW: Replaceable Cross (RC)
-  ]), discard: [] }; }
+  function makeDeck(size){
+    const cfgMap = {
+      7: { Straight:10, Elbow:6, RStraight:3, RElbow:2, Cross:2, RCross:1 },
+      9: { Straight:13, Elbow:8, RStraight:4, RElbow:3, Cross:2, RCross:2 },
+    };
+    const cfg = cfgMap[size] || (size <= 7 ? cfgMap[7] : cfgMap[9]);
+    return {
+      draw: shuffle([
+        ...Array(cfg.Straight).fill(TrackCard.Straight),
+        ...Array(cfg.Elbow).fill(TrackCard.Elbow),
+        ...Array(cfg.RStraight).fill(TrackCard.RStraight),
+        ...Array(cfg.RElbow).fill(TrackCard.RElbow),
+        ...Array(cfg.Cross).fill(TrackCard.Cross),
+        ...Array(cfg.RCross).fill(TrackCard.RCross),
+      ]),
+      discard: []
+    };
+  }
   function makeBoard(N){ const b=[]; for(let y=0;y<N;y++){ const r=[]; for(let x=0;x<N;x++){ r.push({track:null,rot:0,owner:null,token:null}); } b.push(r);} return b; }
 
   const UI = {
@@ -168,6 +185,7 @@
 
   const state={ N:9, cell:64, pad:20, board:makeBoard(9),
     players:PLAYERS.map(p=>({...p, deck:makeDeck(), drawn:null, tokens:0, drawLocked:false, drawUsed:false, tokenUsed:false, rollUsed:false, skipCount: 0, elbowSkipCount: 0, forceElbow: false })),
+    cornerLockTurns: PLAYERS.map(()=>0),
 
     current:0, phase:'idle', subphase:null, highlight:[], hover:null, forcePlace:false, previewRot:0, die:null, tokenSelect:null,
     turnAdvancing:false
@@ -247,7 +265,9 @@ function cornerFor(pid){
   function newGame(){
     state.N = parseInt(UI.boardSize().value,10);
     state.board = makeBoard(state.N);
-    state.players = PLAYERS.map(p=>({...p, deck:makeDeck(), drawn:null, tokens:0, drawLocked:false, drawUsed:false, tokenUsed:false, rollUsed:false, skipCount: 0, elbowSkipCount: 0, forceElbow: false }));
+    state.players = PLAYERS.map(p=>({...p, deck:makeDeck(state.N), drawn:null, tokens:0, drawLocked:false, drawUsed:false, tokenUsed:false, rollUsed:false, skipCount: 0, elbowSkipCount: 0, forceElbow: false }));
+    state.cornerLockTurns = PLAYERS.map(() => 0);
+    state.cornerSealed    = PLAYERS.map(() => false);
     state.current = 0;
     startTurn();
     if (Array.isArray(state.players)) for (const pl of state.players) pl.tokens = 0;
@@ -258,6 +278,23 @@ function cornerFor(pid){
     P.drawLocked=false; P.drawUsed=false; P.tokenUsed=false; P.rollUsed=false;
     state.phase='idle'; state.subphase=null; state.highlight=[]; state.hover=null; state.previewRot=0; state.die=null; state.tokenSelect=null; state.rotateFocus=null;
     checkForcePlace();
+    // Ensure counter exists on first load (startTurn runs before newGame)
+    if (!state.cornerLockTurns) state.cornerLockTurns = PLAYERS.map(()=>0);    
+
+    // Corner lock tracker — trigger only when the corner is *truly* locally sealed:
+    // corner has a track, both neighbors have tracks, and no single-tile rotation (corner or either neighbor)
+    // can create a reciprocal connection into the board.
+    const owner = currentPlayer();
+    if (isCornerSealed(owner.id)) {
+      state.cornerLockTurns[owner.id] = (state.cornerLockTurns[owner.id] || 0) + 1;
+    } else {
+      state.cornerLockTurns[owner.id] = 0;
+    }
+    // Immediate Corner Fix if THIS owner's corner is sealed (detected on last topology change)
+    if (isCornerSealed(P.id)) {
+      startCornerFixCross(P.id);
+      return; // fix subphase renders/locks HUD
+    }    
     updateHUD();
   }
 
@@ -276,7 +313,8 @@ function cornerFor(pid){
 
     state.current=(state.current+1)%state.players.length;
     startTurn();
-    setStatus('Turn passed.');
+    // Don't overwrite Corner Fix warning after startTurn()
+    if (state.phase !== 'cornerFix') setStatus('Turn passed.');
     state.turnAdvancing=false;
   }
 
@@ -336,6 +374,88 @@ function connectedTrackFromCorner(pid){
     }
   }
   return comp;
+}
+
+// Start: Code to prevent "corner-lockout"
+function cornerNeighbors(pid){ // returns [{x,y} corner, {x,y} n1, {x,y} n2]
+  const c = cornerFor(pid);
+  if (PLAYERS[pid].pocket === 'NW') return [c, {x:1,y:0},{x:0,y:1}];
+  if (PLAYERS[pid].pocket === 'NE') return [c, {x:state.N-2,y:0},{x:state.N-1,y:1}];
+  if (PLAYERS[pid].pocket === 'SE') return [c, {x:state.N-2,y:state.N-1},{x:state.N-1,y:state.N-2}];
+  // SW
+  return [c, {x:1,y:state.N-1},{x:0,y:state.N-2}];
+}
+
+// --- Corner seal detector (local, rotation-cost aware) ---
+// A corner is considered sealed iff BOTH adjacent neighbors exist AND, for each neighbor,
+// the minimal number of tiles you'd need to rotate (corner and/or that neighbor) to create
+// a reciprocal connection is > 1. In other words: there is NO one-tile fix.
+const RR_ROTATIONS = [0,90,180,270];
+function rotatedOpeningsType(type, rot){ return OPENINGS[type].map(([dx,dy])=>rotDir([dx,dy], rot)); }
+function hasReciprocalTypes(typeA, rotA, typeB, rotB, dx, dy){
+  const aOK = rotatedOpeningsType(typeA, rotA).some(([rx,ry])=>rx===dx && ry===dy);
+  if(!aOK) return false;
+  const bOK = rotatedOpeningsType(typeB, rotB).some(([rx,ry])=>rx===-dx && ry===-dy);
+  return bOK;
+}
+function minRotationsToConnect(cornerCell, nbrCell, dx, dy){
+  if(!cornerCell?.track || !nbrCell?.track) return Infinity;
+  let best = Infinity;
+  for (const rc of RR_ROTATIONS){
+    for (const rn of RR_ROTATIONS){
+      if (hasReciprocalTypes(cornerCell.track, rc, nbrCell.track, rn, dx, dy)){
+        const cost = (rc===cornerCell.rot?0:1) + (rn===nbrCell.rot?0:1); // tile-count cost
+        if (cost < best) best = cost;
+      }
+    }
+  }
+  return best;
+}
+
+function isCornerSealed(pid){
+  const [co, n1, n2] = cornerNeighbors(pid);
+  const corner = state.board[co.y][co.x];
+  const a = state.board[n1.y][n1.x];
+  const b = state.board[n2.y][n2.x];
+  if (!corner.track) return false;
+  if (!(a.track && b.track)) return false; // evaluate only once both neighbors exist
+
+  // Only the explicit "perpendicular straights jam" counts as sealed.
+  // Corner must be a Straight, and both adjacent tiles must be Straights, and
+  // both must be perpendicular to the corner's orientation.
+  if (corner.track !== 'Straight') return false;
+  if (!(a.track === 'Straight' && b.track === 'Straight')) return false;
+  const isH = (rot) => ((rot % 180) === 0);
+  const cornerIsHorizontal = isH(corner.rot);
+  const aIsHorizontal      = isH(a.rot);
+  const bIsHorizontal      = isH(b.rot);
+  // Horizontal corner jammed by two verticals, or vertical corner jammed by two horizontals
+  return (cornerIsHorizontal && !aIsHorizontal && !bIsHorizontal) ||
+         (!cornerIsHorizontal && aIsHorizontal && bIsHorizontal);
+}
+
+function startCornerFixCross(ownerId){
+  state.phase = 'cornerFix';
+  state.fixOwner  = ownerId;
+  state.fixCorner = cornerFor(ownerId); // {x,y}
+  state.highlight = [state.fixCorner];
+  state.rotateFocus = null; state.previewRot = 0;
+  // Show a persistent RED warning while the fix is pending
+  setStatus('<span class="warn">Your corner is sealed. Click on your corner track to replace it with a cross track.</span>');
+  updateHUD();
+}
+// Recompute corner seals after any topology change and toast when a new seal appears
+function onTopologyChanged(){
+  if (!state.cornerSealed) state.cornerSealed = PLAYERS.map(()=>false);
+  const prev = state.cornerSealed.slice();
+  const now  = PLAYERS.map(p=>isCornerSealed(p.id));
+  state.cornerSealed = now;
+  for (let pid=0; pid<PLAYERS.length; pid++){
+    if (now[pid] && !prev[pid]){
+      // Keep toast visible long enough to read
+      toast(PLAYERS[pid].name + " corner sealed — corner will be auto-fixed on their next turn.", 4500);      
+    }
+  }
 }
 
 // Correctly compute placement highlight positions applying these rules:
@@ -487,10 +607,14 @@ function checkForceElbow(P){
     }
     state.highlight = options;
     if(options.length===0){
-      setStatus('No token moves or corner placement available. Auto-advancing turn…');
-      endTurn();
+      // No tokens on board and no corner placement available — do NOT auto-advance.
+      setStatus('No tokens to apply an action to. Place a token at your corner first or Draw/Place tracks.');
+      toast('No tokens to act on');
+      // Keep Token Action available: exit token mode without consuming the action.
+      state.phase='idle'; state.subphase=null; state.tokenSelect=null; state.highlight=[]; state.hover=null;
+      render(); updateHUD();
       return;
-    }
+    } 
     setStatus('Token: click a token to move OR click your corner to place a new token (may traverse opponents via connected pipes).');
     updateHUD();
   }
@@ -522,7 +646,9 @@ function checkForceElbow(P){
       }
     }
     state.die=null; dieTag().textContent='Die: —'; btn('applyBtn').disabled = true;
-    setStatus('Meshed rotation applied to '+rotated+' track cell(s).'); render();
+    setStatus('Meshed rotation applied to '+rotated+' track cell(s).');
+    onTopologyChanged();
+    render();
     maybeAutoAdvance();
   }
 
@@ -540,7 +666,7 @@ function checkForceElbow(P){
       if(myCount < TOKENS_MAX && cCell.track && cCell.token==null){ hasOption = true; }
       if(!hasOption){
         for(const t of myTokens){
-          if(reachableFrom(t).length>0){ hasOption=true; break; }
+          if(reachableFrom(t, P.id).length>0){ hasOption=true; break; }
         }
       }
       if(hasOption) return;
@@ -561,11 +687,32 @@ function checkForceElbow(P){
   canvasEl.addEventListener('mousemove', (e)=>{
     const rect=canvasEl.getBoundingClientRect(); const {x,y}=toCell(e.clientX-rect.left, e.clientY-rect.top);
     if(x<0||y<0||x>=state.N||y>=state.N){ state.hover=null; render(); return; }
-    state.hover={x,y}; render();
+    state.hover={x,y};
+    render();
   });
   canvasEl.addEventListener('click', (e)=>{
+    if(state.turnAdvancing) return;
     const rect=canvasEl.getBoundingClientRect(); const {x,y}=toCell(e.clientX-rect.left, e.clientY-rect.top);
     if(x<0||y<0||x>=state.N||y>=state.N) return;
+
+    // ----- Corner Fix: replace owner's corner with Cross (free) -----
+    if (state.phase === 'cornerFix'){
+      const P = currentPlayer();
+      const c = state.fixCorner;             // set by startCornerFixCross(ownerId)
+      if (!(c && x===c.x && y===c.y)){
+        toast('Click your corner to apply the fix.');
+        return;
+      }
+      const cell = state.board[y][x];
+      cell.track = 'Cross';
+      cell.owner = P.id;
+      cell.rot   = 0;                        // Cross is symmetric
+      state.phase='idle'; state.highlight=[]; state.hover=null;
+      state.fixOwner=null; state.fixCorner=null;
+      if (typeof onTopologyChanged === 'function') onTopologyChanged();
+      render(); updateHUD(); setStatus('Corner fixed: Cross placed.');
+      return;
+    }    
 
     // PLACE phase
     if(state.phase==='place')
@@ -578,13 +725,15 @@ function checkForceElbow(P){
          && state.rotateFocus
          && state.rotateFocus.x===x
          && state.rotateFocus.y===y) {
-        cell.rot = mod360(state.previewRot || cell.rot);
+        // Keep 0° preview; 0 is valid and should not be treated as falsy
+        cell.rot = mod360((state.previewRot ?? cell.rot));          
         P.deck.discard.push(P.drawn); P.drawn = null;
         P.skipCount = 0;
         state.forcePlace = false;     // placing satisfies the force rule
         state.subphase = null; state.rotateFocus = null; state.previewRot = 0;
         pulse(x,y);
         state.phase='idle'; state.highlight=[]; state.hover=null;
+        onTopologyChanged();
         render(); updateHUD(); setStatus('Rotation applied.'); maybeAutoAdvance();
         return;
      }      
@@ -604,6 +753,7 @@ function checkForceElbow(P){
         state.forcePlace = false;   // placing satisfies the force rule
         pulse(x,y);
         state.phase='idle'; state.highlight=[]; state.hover=null; state.previewRot=0;
+        onTopologyChanged();
         render(); updateHUD(); setStatus('Track replaced with Cross (ownership changed).'); maybeAutoAdvance();
         return;
       }
@@ -614,13 +764,15 @@ function checkForceElbow(P){
       // *before* any occupancy/adjacency checks. Consume the RS/RE card, clear force/skip,
       // reset rotate state, and return early so no other place-paths run.
       if(state.subphase==='rotateExisting' && state.rotateFocus && state.rotateFocus.x===x && state.rotateFocus.y===y){
-        cell.rot = mod360(state.previewRot || cell.rot);
+        // Keep 0° preview; 0 is valid and should not be treated as falsy
+        cell.rot = mod360((state.previewRot ?? cell.rot));  // May also use: cell.rot = mod360((state.previewRot === undefined || state.previewRot === null) ? cell.rot : state.previewRot);
         P.deck.discard.push(P.drawn); P.drawn=null;
         P.skipCount = 0;
         state.forcePlace = false;   // placing satisfies the force rule
         state.subphase=null; state.rotateFocus=null; state.previewRot=0;
         pulse(x,y);
         state.phase='idle'; state.highlight=[]; state.hover=null;
+        onTopologyChanged();
         render(); updateHUD(); setStatus('Rotation applied.'); maybeAutoAdvance();
         return;
       }
@@ -632,7 +784,8 @@ function checkForceElbow(P){
           state.rotateFocus = {x,y, original: cell.rot};
           state.previewRot = cell.rot;
           state.hover = {x,y};
-          state.highlight = [];  // avoid gating the confirm click on highlights
+          // Visually mark the selected tile as active while rotating
+          state.highlight = [{x,y}];
           setStatus('Rotating '+base+': use Q/E to rotate; click again to confirm or click an empty highlighted cell to place new.');
           render();
           return;
@@ -650,7 +803,7 @@ function checkForceElbow(P){
             P.forceElbow = false;
           }
           pulse(x,y);
-          state.phase='idle'; state.highlight=[]; state.hover=null; updateHUD(); setStatus('Placed. You cannot draw again this turn.');
+          state.phase='idle'; state.highlight=[]; state.hover=null; onTopologyChanged(); updateHUD(); setStatus('Placed. You cannot draw again this turn.');
           maybeAutoAdvance();
           return;
     }
@@ -731,7 +884,7 @@ function checkForceElbow(P){
 
   // === ROTATE PREVIEW KEYS (anchor: RR_ROTATE_KEYS) ===
   window.addEventListener('keydown', (e)=>{
-    if (state.phase !== 'place') return;             // Q/E only in Place phase
+    if (state.phase !== 'place') return;
     const k = e.key.toLowerCase();
     if (k !== 'q' && k !== 'e') return;
 
@@ -777,6 +930,26 @@ function checkForceElbow(P){
 
   function updateHUD(){
     const P=currentPlayer();
+
+    // Corner Fix HUD lock: show a RED warning and disable all actions until the free Cross is applied
+    if (state.phase === 'cornerFix'){
+      // Make sure the tags reflect the current subphase
+      turnTag().textContent='Turn: '+P.name+' ('+P.pocket+')';
+      phaseTag().textContent='Phase: cornerFix';
+      setStatus('<span class="warn">Your corner is sealed. Click on your corner track to replace it with a cross track.</span>');
+      drawTag().textContent = 'Draw: Locked (Corner Fix)';
+      btn('drawBtn').disabled   = true;
+      btn('placeBtn').disabled  = true;
+      btn('bottomBtn').disabled = true;
+      btn('tokenBtn').disabled  = true;
+      btn('rollBtn').disabled   = true;
+      btn('applyBtn').disabled  = true;
+      endTurnBtn.disabled = true;
+      overrideBtn.style.display = 'none';
+      render();
+      return;
+    }
+
     if (P.drawn && (P.drawn===TrackCard.Straight || P.drawn===TrackCard.Elbow ||
         P.drawn===TrackCard.Cross || P.drawn===TrackCard.RStraight ||
         P.drawn===TrackCard.RElbow || P.drawn===TrackCard.RCross)) {
@@ -792,9 +965,11 @@ function checkForceElbow(P){
       (P.drawLocked ? 'Locked' : (P.drawUsed ? 'Used' : 'Ready'))
     );    
     rollTag().textContent='Roll: '+(P.rollUsed ? 'Used' : 'Ready');
-    btn('drawBtn').disabled = !!P.drawn || !!P.drawLocked || !!P.drawUsed;
-    // Enable Place only when a track card is in hand
+    // Deterministic draw gating; allow draw during forced-draw even if previously locked/used
+    const _forcedDrawOK = state.forcePlace && !P.drawn;
+    btn('drawBtn').disabled = !!P.drawn || ((P.drawLocked || P.drawUsed) && !_forcedDrawOK);    // Enable Place only when a track card is in hand
     btn('placeBtn').disabled = !P.drawn;    
+
     // Disable Bottom when there's nothing to bottom, or when maximum-skips forces a draw/place
     btn('bottomBtn').disabled = !P.drawn || state.forcePlace;    
     btn('applyBtn').disabled = !(state.die && state.die!=='X');
@@ -864,7 +1039,6 @@ function checkForceElbow(P){
       const list = (reached && reached.size) ? Array.from(reached).map(n=>n[0]).join(', ') : '';
       el.textContent = 'Score: ' + (reached ? reached.size : 0) + '/3' + (list?(' ['+list+']'):'');
     })();
-    if(!P.drawn && !P.drawLocked && !P.drawUsed){ btn('drawBtn').disabled = false; }
     render();
   }
 
@@ -880,6 +1054,8 @@ function checkForceElbow(P){
     for(let i=1;i<N;i++){ ctx.beginPath(); ctx.moveTo(i*cell,0); ctx.lineTo(i*cell,size); ctx.stroke(); ctx.beginPath(); ctx.moveTo(0,i*cell); ctx.lineTo(size,i*cell); ctx.stroke(); }
     // gears (background)
     for(let y=0;y<N;y++) for(let x=0;x<N;x++){ drawGear(x,y); }
+    // corner color badges
+    drawCornerBadges();
     // tracks
     for(let y=0;y<N;y++) for(let x=0;x<N;x++){ const c=state.board[y][x]; if(c.track) drawTrack(c.track, c.rot, x,y,1); }
     // tokens
@@ -896,17 +1072,68 @@ function checkForceElbow(P){
     // placement highlights
     ctx.strokeStyle=COLORS.hilite; ctx.lineWidth=3;
     state.highlight.forEach(p=>{ ctx.strokeRect(p.x*cell+3, p.y*cell+3, cell-6, cell-6); });
+    // stronger "active" outline while rotating an existing tile with RS/RE
+    if(state.phase==='place' && state.subphase==='rotateExisting' && state.rotateFocus){
+      const rf = state.rotateFocus;
+      ctx.save();
+      ctx.lineWidth = 5;
+      ctx.setLineDash([6,4]);
+      ctx.strokeStyle = '#ffcc00';
+      ctx.strokeRect(rf.x*cell+2, rf.y*cell+2, cell-4, cell-4);
+      ctx.restore();
+    }    
     // ghost
     const P=currentPlayer();
     if(state.phase==='place' && state.subphase==='rotateExisting' && state.rotateFocus) {
       const rf = state.rotateFocus; const c = state.board[rf.y][rf.x];
       drawTrack(c.track, state.previewRot, rf.x, rf.y, 0.9);
     }
-    //else if(state.phase==='place' && state.hover && P.drawn){
     else if(state.phase==='place' && state.hover && P.drawn && P.drawn!==TrackCard.RCross){
       const {x,y}=state.hover;
       const legal=state.highlight.some(h=>h.x===x&&h.y===y);
       if(legal) drawTrack(baseDrawnType(P.drawn), state.previewRot, x,y,0.55);
+    }
+    ctx.restore();
+  }
+
+  // === CORNER COLOR BADGES (anchor: RR_CORNER_BADGES) ===
+  // Draw a small right-triangle in each player's corner using their color.
+  function drawCornerBadges(){
+    const cell = state.cell;
+    const m = 3;                                // inset margin
+    const t = Math.max(8, Math.floor(cell * 0.25)); // triangle leg length
+    ctx.save();
+    ctx.globalAlpha = 0.85;
+    for (const P of PLAYERS){
+      const c = cornerFor(P.id);
+      const px = c.x * cell, py = c.y * cell;
+      ctx.beginPath();
+      switch (P.pocket){
+        case 'NW':
+          ctx.moveTo(px + m,         py + m);
+          ctx.lineTo(px + m + t,     py + m);
+          ctx.lineTo(px + m,         py + m + t);
+          break;
+        case 'NE':
+          ctx.moveTo(px + cell - m,      py + m);
+          ctx.lineTo(px + cell - m - t,  py + m);
+          ctx.lineTo(px + cell - m,      py + m + t);
+          break;
+        case 'SE':
+          ctx.moveTo(px + cell - m,      py + cell - m);
+          ctx.lineTo(px + cell - m - t,  py + cell - m);
+          ctx.lineTo(px + cell - m,      py + cell - m - t);
+          break;
+        // 'SW'
+        default:
+          ctx.moveTo(px + m,         py + cell - m);
+          ctx.lineTo(px + m + t,     py + cell - m);
+          ctx.lineTo(px + m,         py + cell - m - t);
+          break;
+      }
+      ctx.closePath();
+      ctx.fillStyle = P.color;
+      ctx.fill();
     }
     ctx.restore();
   }
