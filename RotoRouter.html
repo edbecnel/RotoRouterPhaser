@@ -89,6 +89,18 @@
         <hr style="border-color:#1f2636"/>
         <div class="row"><button class="btn" id="endTurnBtn">End Turn</button>
         <button id="overrideBtn" style="display:none;">Override</button></div>
+
+        <hr style="border-color:#1f2636"/>
+        <div class="row"><b>Undo / Redo</b></div>
+        <div class="row">
+          <button class="btn" id="undoGlobalBtn" disabled>Undo (Global)</button>
+          <button class="btn" id="redoGlobalBtn" disabled>Redo (Global)</button>
+        </div>
+        <div class="row">
+          <button class="btn" id="undoTurnBtn" disabled>Undo (Turn)</button>
+          <button class="btn" id="redoTurnBtn" disabled>Redo (Turn)</button>
+        </div>
+
         <h2>Save / Load</h2>
         <div class="panel">
           <div class="row">
@@ -148,6 +160,14 @@
     { id:2, name:'Blue', color: COLORS.tokenB, pocket:'SE' },
     { id:3, name:'Yellow', color: COLORS.tokenY, pocket:'SW' },
   ];
+  // ==== UNDO / REDO CONFIG ====
+  // Master switch and per-scope toggles (code-only; no UI)
+  const UNDO_CONFIG = {
+    enabled: true,     // turn Undo/Redo on/off entirely
+    global:  true,     // allow Global undo/redo
+    turn:    true      // allow Player-turn-scoped undo/redo
+  };
+
 
   // Openings — Elbow base = EAST+NORTH (NE), Straight is horizontal base
   const OPENINGS={
@@ -199,14 +219,186 @@
   const state={ N:9, cell:64, pad:20, board:makeBoard(9),
     players:PLAYERS.map(p=>({...p, deck:makeDeck(), drawn:null, tokens:0, drawLocked:false, drawUsed:false, tokenUsed:false, rollUsed:false, skipCount: 0, elbowSkipCount: 0, forceElbow: false })),
     cornerLockTurns: PLAYERS.map(()=>0),
-
     current:0, phase:'idle', subphase:null, highlight:[], hover:null, forcePlace:false, previewRot:0, die:null, tokenSelect:null,
     turnAdvancing:false,
+    deadFixDoneThisTurn: false,
     rotAnims: [],  // active rotation tweens (on placed tiles)
     ghostRotAnim: null,   // {from,to,t0,dur} while rotating the ghost
-    _animating: false     // RAF loop guard
+    _animating: false,     // RAF loop guard
+    // Undo/Redo stacks
+    history: [],        // Global undo stack (array of snapshots)
+    redo:    [],        // Global redo stack
+    turnHistory: [],    // Per-turn undo stack (current player's turn)
+    turnRedo:   []      // Per-turn redo stack
   };
   const canvas=UI.canvas(); const ctx=canvas.getContext('2d');
+
+  // ==== UNDO / REDO HELPERS ====
+  function pushHistory(label){
+    if (!UNDO_CONFIG.enabled) return;
+    const snap = snapshotState();
+    snap.__turnId = state.current;      // tag snapshot with current player's turn id
+    snap.__undo_label = label || '';
+    // Global
+    if (UNDO_CONFIG.global){
+      state.history.push(snap);
+      state.redo.length = 0; // new action invalidates redo
+    }
+    // Turn-scoped
+    if (UNDO_CONFIG.turn){
+      state.turnHistory.push(snap);
+      state.turnRedo.length = 0;
+    }
+    updateUndoButtons();
+  }
+
+  function applySnapshotFromHistory(snap, label, op){
+    // op is 'undo' or 'redo'
+    applySnapshot(snap, { fromHistory: true, status: label || null, op });
+  }
+
+  function updateUndoButtons(){
+    // Called inside updateHUD() as well, but safe to call anytime
+    const gCanUndo = UNDO_CONFIG.enabled && UNDO_CONFIG.global && state.history.length > 0;
+    const gCanRedo = UNDO_CONFIG.enabled && UNDO_CONFIG.global && state.redo.length > 0;
+
+    const tCanUndo = UNDO_CONFIG.enabled && UNDO_CONFIG.turn && state.turnHistory.length > 1; // need ≥1 action beyond baseline
+    const tCanRedo = UNDO_CONFIG.enabled && UNDO_CONFIG.turn && state.turnRedo.length > 0;
+
+    const bU = document.getElementById('undoGlobalBtn');
+    const bR = document.getElementById('redoGlobalBtn');
+    const bTU= document.getElementById('undoTurnBtn');
+    const bTR= document.getElementById('redoTurnBtn');
+
+    if (bU) bU.disabled  = !gCanUndo;
+    if (bR) bR.disabled  = !gCanRedo;
+    if (bTU) bTU.disabled = !tCanUndo;
+    if (bTR) bTR.disabled = !tCanRedo;
+  }
+
+  // Global Undo/Redo (mirrors into Turn stacks so buttons stay in sync)
+  function undoGlobal(){
+    if (!UNDO_CONFIG.enabled || !UNDO_CONFIG.global) return;
+    if (state.history.length === 0) return;
+
+    const cur = snapshotState();            // current state → global redo
+    const prev = state.history.pop();       // previous snapshot to apply
+    state.redo.push(cur);
+
+    // Mirror into Turn stacks
+    if (UNDO_CONFIG.turn) {
+      const curTurnId  = state.current;
+      const stepTurnId = (prev && prev.__turnId != null) ? prev.__turnId : curTurnId;
+
+      if (stepTurnId === curTurnId) {
+        // Undoing a step from THIS turn → pop one from per-turn history
+        if (state.turnHistory.length > 1) {
+          state.turnRedo.push(cur);
+          state.turnHistory.pop();
+        }
+      } else {
+        // Undoing into a different turn → collapse to baseline for clarity
+        state.turnHistory = state.turnHistory.slice(0, 1);
+        state.turnRedo.length = 0;
+      }
+    }
+
+    applySnapshotFromHistory(prev, 'Undid (Global).', 'undo');
+    toast('Undo (Global)');
+    updateUndoButtons();
+  }
+
+  function redoGlobal(){
+    if (!UNDO_CONFIG.enabled || !UNDO_CONFIG.global) return;
+    if (state.redo.length === 0) return;
+
+    const cur  = snapshotState();       // current state → global history
+    const next = state.redo.pop();      // snapshot to reapply
+    state.history.push(cur);
+
+    // Mirror into Turn stacks
+    if (UNDO_CONFIG.turn) {
+      const curTurnId  = state.current;
+      const stepTurnId = (next && next.__turnId != null) ? next.__turnId : curTurnId;
+
+      if (stepTurnId === curTurnId) {
+        // Redoing a step that belongs to THIS turn
+        state.turnHistory.push(cur);
+        if (state.turnRedo.length > 0) state.turnRedo.pop();
+      } else {
+        // Redoing into a different turn → keep per-turn at baseline
+        state.turnHistory = state.turnHistory.slice(0, 1);
+        state.turnRedo.length = 0;
+      }
+    }
+
+    applySnapshotFromHistory(next, 'Redid (Global).', 'redo');
+    toast('Redo (Global)');
+    updateUndoButtons();
+  }
+
+  // Turn-scoped Undo/Redo (only within the *current* player's turn)
+  function undoTurn(){
+    if (!UNDO_CONFIG.enabled || !UNDO_CONFIG.turn) return;
+    // Need at least baseline + 1 action
+    if (state.turnHistory.length <= 1) return;
+
+    // Current snapshot becomes redo entry
+    const cur = snapshotState();
+
+    // Pop the target "previous" snapshot from turnHistory and apply it
+    const prev = state.turnHistory.pop();
+
+    // Mirror the move to Global stacks so buttons/behavior stay in sync
+    if (UNDO_CONFIG.global && state.history.length > 0) {
+      // push current to global redo, drop one from global history
+      state.redo.push(cur);
+      state.history.pop();
+    }
+
+    // Turn redo receives current
+    state.turnRedo.push(cur);
+
+    applySnapshotFromHistory(prev, 'Undid (Turn).', 'undo');
+    toast('Undo (Turn)');
+    updateUndoButtons();
+  }
+
+  function redoTurn(){
+    if (!UNDO_CONFIG.enabled || !UNDO_CONFIG.turn) return;
+    if (state.turnRedo.length === 0) return;
+
+    const cur = snapshotState();
+    const next = state.turnRedo.pop();
+
+    // Mirror to Global stacks
+    if (UNDO_CONFIG.global) {
+      // current becomes a new step in global history
+      state.history.push(cur);
+      // consume one from global redo if available
+      if (state.redo.length > 0) state.redo.pop();
+    }
+
+    // Turn history receives current
+    state.turnHistory.push(cur);
+
+    applySnapshotFromHistory(next, 'Redid (Turn).', 'redo');
+    toast('Redo (Turn)');
+    updateUndoButtons();
+  }
+
+  // Reset per-turn history at the start of each player's turn.
+  function resetTurnHistory(){
+    state.turnHistory = [];
+    state.turnRedo    = [];
+    // Push a baseline so "first action" undo target exists,
+    // but keep the button disabled until an action actually happens.
+    if (UNDO_CONFIG.enabled && UNDO_CONFIG.turn){
+      state.turnHistory.push(snapshotState());
+      state.turnRedo.length = 0;
+    }
+    updateUndoButtons();
+  }
 
   // ===== SAVE / LOAD =====
 
@@ -260,6 +452,7 @@
       // Corner/seal bookkeeping
       cornerLockTurns: Array.isArray(state.cornerLockTurns) ? [...state.cornerLockTurns] : null,
       cornerSealed: Array.isArray(state.cornerSealed) ? [...state.cornerSealed] : null,
+      deadFixDoneThisTurn: !!state.deadFixDoneThisTurn,   // ← top-level, not per-player
       // We intentionally DO NOT persist: phase, subphase, highlights, die, animations, hover, etc.
     };
   }
@@ -286,7 +479,7 @@
   }
 
   // Apply a snapshot back into our live state (safe restore)
-  function applySnapshot(snap) {
+  function applySnapshot(snap, opts) {
     // Basic validation
     if (!snap || typeof snap !== 'object' || snap.__rr_version == null) {
       throw new Error('Not a valid RotoRouter save file.');
@@ -294,7 +487,11 @@
     if (!Number.isInteger(snap.N) || !Array.isArray(snap.board) || !Array.isArray(snap.players)) {
       throw new Error('Save is missing required fields.');
     }
-
+    // Clear stacks only on real loads, not when applying from history
+    if (!opts || !opts.fromHistory) {
+      state.history = []; state.redo = [];
+      state.turnHistory = []; state.turnRedo = [];
+    }
     // Resize board if needed & sync dropdown
     state.N = snap.N;
     const sizeSel = UI.boardSize();
@@ -364,6 +561,7 @@
     state.turnAdvancing = false;
     state.rotAnims = [];
     state.ghostRotAnim = null;
+    state.deadFixDoneThisTurn = !!snap.deadFixDoneThisTurn;   // default false if absent
 
     // Recompute saturation immediately after restore
     refreshBoardSaturation();
@@ -374,10 +572,29 @@
     // Resize canvas for the (possibly) new N and redraw
     resize();
     updateHUD();
+
+    if (opts && opts.fromHistory) {
+      // After UNDO, resume Dead-Straight Fix if eligible (highlights/prompt return)
+      if (opts.op === 'undo') {
+        maybeResumeDeadFixAfterHistory();
+      }
+      // After REDO, re-enter start-of-turn fix phases (Corner Fix or Dead-Straight Fix) if eligible
+      else if (opts.op === 'redo') {
+        maybeEnterFixPhasesAfterRedo();
+      }
+      // If we are not in a fix subphase, show the provided status (e.g., “Redid (Global)”).
+      if (state.phase !== 'cornerFix' && state.phase !== 'deadFix' && opts.status) {
+        setStatus(opts.status);
+      }
+      render();
+      return;
+    }
+
+    // ---- real file load path ----
     setStatus('Game loaded.');
     render();
-    // Ensure per-turn checks (including corner seal) run immediately after a load
-    startTurn();    
+    startTurn();
+    return;
   }
 
   function loadFromFile(file) {
@@ -479,6 +696,63 @@ function cornerFor(pid){
     return out;
   }
 
+  // Re-enter the Dead-Straight Fix subphase after an undo/redo,
+  // if eligible (i.e., there are trapped straights on the board).
+  function maybeResumeDeadFixAfterHistory(){
+    if (state.deadFixDoneThisTurn) return;   // player already used the free fix this turn
+
+    // Don't collide with Corner Fix or while the turn is advancing
+    if (state.phase === 'cornerFix' || state.turnAdvancing) return;
+
+    // Only resume when we're otherwise idle (e.g., after undo)
+    if (state.phase !== 'idle') return;
+
+    const trapped = (typeof findAllTrappedStraights === 'function')
+      ? findAllTrappedStraights()
+      : [];
+
+    if (!trapped.length) return;
+
+    state.phase    = 'deadFix';
+    state.subphase = 'pickDeadStraight';
+    state.highlight = trapped;
+
+    const msg = 'Dead-Straight Fix: replace ONE highlighted Straight with a Cross (free).';
+    setStatus(msg);
+    render();
+    updateHUD(); // keeps the Draw tag as "Locked (Dead-Straight Fix)" when board is full
+  }
+
+  // Re-enter fix subphases after a REDO when we're idle.
+  // We avoid startTurn() here to keep undo/redo stacks intact.
+  function maybeEnterFixPhasesAfterRedo(){
+    if (state.turnAdvancing) return;
+    if (state.phase !== 'idle') return;
+
+    const P = currentPlayer();
+
+    // Corner Fix first (don’t collide with Dead-Straight Fix)
+    if (typeof isCornerSealed === 'function' && isCornerSealed(P.id)) {
+      startCornerFixCross(P.id);
+      return; // Corner Fix UI takes over HUD/locks actions
+    }
+
+    // Dead-Straight Fix (only if not already consumed this turn)
+    if (!state.deadFixDoneThisTurn && typeof findAllTrappedStraights === 'function') {
+      const trapped = findAllTrappedStraights();
+      if (trapped && trapped.length){
+        state.phase    = 'deadFix';
+        state.subphase = 'pickDeadStraight';
+        state.highlight = trapped;
+        const msg = 'Dead-Straight Fix: replace ONE highlighted Straight with a Cross (free).';
+        setStatus(msg);
+        render();
+        updateHUD();
+        return;
+      }
+    }
+  }
+
   function isBoardFullyTracked(){
     for (let y=0; y<state.N; y++){
       for (let x=0; x<state.N; x++){
@@ -562,7 +836,15 @@ function cornerFor(pid){
     state.cornerLockTurns = PLAYERS.map(() => 0);
     state.cornerSealed    = PLAYERS.map(() => false);
     state.current = 0;
+
+    // Reset undo/redo
+    state.history = []; state.redo = [];
+    state.turnHistory = []; state.turnRedo = [];
+
+    // Now start the turn; this will push the baseline snapshot
     startTurn();
+    updateUndoButtons();
+
     setStatus('New Game → Draw → Place. First placement is your corner.');
     state.rotAnims = [];
     state.ghostRotAnim = null;
@@ -573,7 +855,10 @@ function cornerFor(pid){
 
   function startTurn(){
     const P=currentPlayer();
+    resetTurnHistory();
     P.drawLocked=false; P.drawUsed=false; P.tokenUsed=false; P.rollUsed=false;
+
+    state.deadFixDoneThisTurn = false;
     state.phase='idle'; state.subphase=null; state.highlight=[]; state.hover=null; state.previewRot=0; state.die=null; state.tokenSelect=null; state.rotateFocus=null;
     checkForcePlace();
     // Ensure counter exists on first load (startTurn runs before newGame)
@@ -596,7 +881,7 @@ function cornerFor(pid){
     // --- Dead-Straight Fix (STRICT: trapped straight) ---
     if (state.phase !== 'cornerFix'){ // don't collide with Corner Fix UI
       const trapped = findAllTrappedStraights();
-      if (trapped.length){
+      if (trapped.length && !state.deadFixDoneThisTurn) {
         state.phase    = 'deadFix';
         state.subphase = 'pickDeadStraight';
         state.highlight = trapped;
@@ -616,6 +901,8 @@ function cornerFor(pid){
   }
 
   function endTurnImmediate(){
+    pushHistory('End Turn');
+
     // If the ending player is still holding a track card, count as a skip
     const endingP = state.players[state.current];
     if (endingP.drawn && isTrackCard(endingP.drawn)) {
@@ -645,6 +932,8 @@ function cornerFor(pid){
 
   // Draw (1/turn)
   function drawCard(){
+    pushHistory('Draw');
+
     if (state.boardSaturated){ setStatus('Board is full of tracks — drawing is disabled.'); toast('Draw disabled (board full)'); return; }
     const P=currentPlayer();
     if(P.drawLocked && !state.forcePlace){ setStatus('You bottomed this turn; drawing is locked until End Turn.'); return; }
@@ -915,6 +1204,7 @@ function checkForceElbow(P){
     if (state.boardSaturated){ setStatus('Board is full of tracks — bottoming is disabled.'); toast('Bottom disabled (board full)'); return; }
     const P=currentPlayer();
     if(!P.drawn){ setStatus('Nothing to bottom.'); return; }
+    pushHistory('Bottom');
     const bottomed = P.drawn;            // capture BEFORE clearing
     P.deck.draw.push(bottomed);          // push once
     P.drawn = null;                      // now clear the hand
@@ -967,6 +1257,7 @@ function checkForceElbow(P){
   function rollDie(){
     const P=currentPlayer();
     if(P.rollUsed){ setStatus('You have already rolled this turn.'); return; }
+    pushHistory('Roll');
     const r = Math.floor(Math.random()*DIE_FACES.length); state.die = DIE_FACES[r];
     P.rollUsed = true;
     dieTag().textContent='Die: '+state.die; rollTag().textContent='Roll: Used';
@@ -1022,6 +1313,7 @@ function checkForceElbow(P){
 
   function applyRotation(){
     if(!state.die || state.die==='X') return;
+    pushHistory('Apply Rotation');
     const base = thetaFor(state.die);
     let rotated=0;
     for(let y=0;y<state.N;y++){
@@ -1097,6 +1389,7 @@ function checkForceElbow(P){
         return;
       }
       const cell = state.board[y][x];
+      pushHistory('Corner Fix');
       cell.track = 'Cross';
       cell.owner = P.id;
       cell.rot   = 0;                        // Cross is symmetric
@@ -1112,7 +1405,10 @@ function checkForceElbow(P){
       const hit = state.highlight && state.highlight.some(h => h.x===x && h.y===y);
       if (hit){
         const cell = state.board[y][x];
+
         // Replace the Straight with a Cross; keep owner & token intact
+        pushHistory('Dead-Straight Fix');
+        state.deadFixDoneThisTurn = true;
         cell.track = 'Cross';
         cell.rot   = 0;   // Cross is symmetric
         // owner, token remain unchanged
@@ -1182,6 +1478,7 @@ function checkForceElbow(P){
       // RC: Replaceable Cross — claim any existing track type on click
       if (P.drawn===TrackCard.RCross && cell.track){
         // (Rotation is irrelevant for Cross; keep current orientation or normalize to 0 if you prefer.)
+        pushHistory('Place/Replace');
         cell.track = 'Cross';
         cell.owner = P.id;
         cell.rot = 0; // optional, Cross is symmetric
@@ -1201,6 +1498,7 @@ function checkForceElbow(P){
       if(cell.track){ toast('Cell occupied'); return; }
       if(state.rotateFocus){ const rf=state.rotateFocus; const cc=state.board[rf.y][rf.x]; cc.rot=rf.original; state.rotateFocus=null; state.subphase=null; }
           const placedType = baseDrawnType(P.drawn);
+          pushHistory('Place/Replace');
           cell.track=placedType; cell.rot=state.previewRot; cell.owner=P.id;
           P.deck.discard.push(P.drawn); P.drawn=null;
           P.skipCount = 0;
@@ -1249,6 +1547,7 @@ function checkForceElbow(P){
           const myCount = countTokens(P.id);
           if(myCount >= TOKENS_MAX){ toast('You already have the maximum of 3 tokens.'); return; }
           if(!(cCell.track && (cCell.token==null))){ toast('Corner must have a track and be open.'); return; }
+          pushHistory('Token: place');
           cCell.token = P.id; state.players[P.id].tokens = myCount+1;
           P.tokenUsed = true; tokenTag().textContent='Token: Used'; btn('tokenBtn').disabled = true;
           state.phase='idle'; state.subphase=null; state.highlight=[]; state.tokenSelect=null; setStatus('New token placed at your corner.'); render(); updateHUD();
@@ -1265,6 +1564,7 @@ function checkForceElbow(P){
               const P = currentPlayer();
               const oppId = opponentCornerAt(x,y,P.id);
               const destHasOwner = (oppId != null && state.board[y][x].token === oppId);
+              pushHistory('Token: move');
               // Remove token from source
               state.board[from.y][from.x].token = null;
               // Only place our token if destination doesn’t already hold its owner’s token
@@ -1280,10 +1580,10 @@ function checkForceElbow(P){
               } else {
                 setStatus('Token moved.');
               }
-        })();        
+        })();
 
         currentPlayer().tokenUsed = true; tokenTag().textContent='Token: Used'; btn('tokenBtn').disabled = true;
-              state.phase='idle'; state.subphase=null; state.highlight=[]; state.tokenSelect=null; setStatus('Token moved.'); render(); updateHUD();
+              state.phase='idle'; state.subphase=null; state.highlight=[]; state.tokenSelect=null; render(); updateHUD();
               maybeAutoAdvance();
               return;
       }
@@ -1349,6 +1649,13 @@ function checkForceElbow(P){
     e.target.value = ''; // reset so the same file can be chosen again later
   });
 
+  // Undo/Redo buttons
+  document.getElementById('undoGlobalBtn').addEventListener('click', undoGlobal);
+  document.getElementById('redoGlobalBtn').addEventListener('click', redoGlobal);
+  document.getElementById('undoTurnBtn').addEventListener('click', undoTurn);
+  document.getElementById('redoTurnBtn').addEventListener('click', redoTurn);
+
+
   function updateHUD(){
     const P=currentPlayer();
 
@@ -1359,6 +1666,7 @@ function checkForceElbow(P){
         : 'Draw: Ready (Dead-Straight Fix)';
       setStatus('Dead-Straight Fix: replace ONE highlighted Straight with a Cross (free).');
       render();
+      updateUndoButtons();
       return; // ← prevent later HUD paths from overwriting this status
     }
 
@@ -1396,6 +1704,8 @@ function checkForceElbow(P){
       btn('applyBtn').disabled = !(state.die && state.die!=='X');
 
       render();
+      updateUndoButtons();
+
       return; // keep the early-out
     }
 
@@ -1414,7 +1724,10 @@ function checkForceElbow(P){
       btn('applyBtn').disabled  = true;
       endTurnBtn.disabled = true;
       overrideBtn.style.display = 'none';
+
       render();
+      updateUndoButtons();
+
       return;
     }
 

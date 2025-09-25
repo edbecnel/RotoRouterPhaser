@@ -2,7 +2,7 @@
 
 **Build:** 2025-09-25
 
-This build adds **Save/Load**, the **Board Fully Tracked** lock, and the **Dead-Straight Fix** rule. It also notes a few **pre-existing bugs** that were corrected while integrating these features.
+This build includes **Save/Load**, the **Board Fully Tracked** lock, the **Dead-Straight Fix** rule, and a new **Undo/Redo system**.
 
 ---
 
@@ -19,7 +19,7 @@ This build adds **Save/Load**, the **Board Fully Tracked** lock, and the **Dead-
 
 **Sample file for testing**
 - 9×9 with every cell already containing a track:  
-  **RR_sample_full_board_9x9.json** (use the copy shared in this chat).
+  **RR_sample_full_board_9x9.json**
 
 ---
 
@@ -54,27 +54,54 @@ At the **start of your turn**, if any trapped straights exist:
 
 ---
 
-## Pre-existing bugs fixed during integration
+### 4) Undo / Redo system
+Two scopes are supported:
 
-> These issues existed prior to today’s feature additions and were corrected while wiring up Save/Load and the lock logic.
+- **Global Undo / Redo**  
+  - Steps backward/forward across **any player’s turn**.  
+  - Restores the full game state (board, tokens, decks, turn ownership, etc.).  
+  - After undo/redo, automatic re-entry into fix phases (Corner Fix, Dead-Straight Fix) occurs if applicable.  
 
-1. **Load dialog reported “Not a valid RotoRouter save file.”**  
-   Cause: a stray `applySnapshot();` self-call inside `applySnapshot(snap)` threw an exception after a successful parse.  
-   Fix: removed the self-call; loader now applies the snapshot cleanly.
+- **Turn Undo / Redo**  
+  - Limited to the **current player’s turn only**.  
+  - Starts with a baseline snapshot at the beginning of the turn.  
+  - Lets a player roll back actions they’ve made within that turn, without affecting prior turns.
 
-2. **Corner-seal (“Corner Fix”) only triggered on the *next* player’s turn after a Load.**  
-   Cause: turn-start checks weren’t re-run immediately after applying a snapshot.  
-   Fix: after `applySnapshot(snap)`, we call `startTurn()` so Corner Fix can trigger right away when needed.
-
-3. **Draw/Place remained enabled immediately after loading a full-board save.**  
-   Cause: board-saturation wasn’t recomputed early enough during load.  
-   Fix: call `refreshBoardSaturation()` promptly during `applySnapshot(snap)` and then update HUD; Draw/Place/Bottom disable instantly.
-
-> Note: We intentionally did **not** list fixes created as part of *today’s* new features; those will be documented alongside their feature commits when you push this build.
+**UI**
+- **Undo (Global)** / **Redo (Global)** buttons control the cross-turn history.  
+- **Undo (Turn)** / **Redo (Turn)** buttons control within-turn rollbacks.  
+- Buttons auto-disable when no valid history exists.
 
 ---
 
-## Deck recommendations (unchanged)
+## Developer notes
+
+- **Undo/Redo config:**  
+  ```js
+  const UNDO_CONFIG = { enabled: true, global: true, turn: true };
+  ```
+  Can be toggled in code (no UI).
+
+- **Snapshot tagging:**  
+  Each history snapshot carries a `__turnId` so global operations can stay in sync with per-turn history.
+
+- **Dead-Fix integration:**  
+  - Undo of a Dead-Straight Fix → restores the straight and re-enters fix mode (prompt/highlights).  
+  - Redo of a Dead-Straight Fix → restores the cross and resumes normal play.  
+  - Only one free dead-fix is allowed per turn (`deadFixDoneThisTurn` tracked in state and snapshots).
+
+- **Corner Fix integration:**  
+  - On redo, if a corner is sealed at the start of turn, the Corner Fix prompt reappears.  
+  - On undo, returning to a state before the fix resumes the prompt.
+
+- **Save/Load vs history:**  
+  - `snapshotState()` excludes undo/redo stacks.  
+  - Save/Load clears history stacks and starts fresh.  
+  - Undo/Redo calls pass `{ fromHistory:true }` so stacks aren’t cleared and fix subphases are restored properly.
+
+---
+
+## Deck recommendations
 
 ### 9×9
 - Straight **13**, Elbow **8**, RS **4**, RE **3**, Cross **2**, RCross **2** — total **32**
