@@ -89,6 +89,17 @@
         <hr style="border-color:#1f2636"/>
         <div class="row"><button class="btn" id="endTurnBtn">End Turn</button>
         <button id="overrideBtn" style="display:none;">Override</button></div>
+        <h2>Save / Load</h2>
+        <div class="panel">
+          <div class="row">
+            <button class="btn" id="saveBtn">Save Game</button>
+            <button class="btn" id="loadBtn">Load Game</button>
+            <input type="file" id="loadFile" accept="application/json" style="display:none" />
+          </div>
+          <div class="row small muted">
+            Saves to a local JSON file. Load restores the full game later.
+          </div>
+        </div>
       </div>
 
       <h2>Corners</h2>
@@ -197,6 +208,195 @@
   };
   const canvas=UI.canvas(); const ctx=canvas.getContext('2d');
 
+  // ===== SAVE / LOAD =====
+
+  // Build a plain JSON-safe snapshot of the full game state.
+  function snapshotState() {
+    // Convert Sets to arrays, drop transient/animation fields
+    const players = state.players.map(p => ({
+      id: p.id,
+      name: p.name,
+      color: p.color,
+      pocket: p.pocket,
+      deck: {
+        draw: [...(p.deck?.draw || [])],
+        discard: [...(p.deck?.discard || [])],
+      },
+      drawn: p.drawn ?? null,
+      tokens: p.tokens|0,
+      drawLocked: !!p.drawLocked,
+      drawUsed: !!p.drawUsed,
+      tokenUsed: !!p.tokenUsed,
+      rollUsed: !!p.rollUsed,
+      skipCount: p.skipCount|0,
+      elbowSkipCount: p.elbowSkipCount|0,
+      forceElbow: !!p.forceElbow,
+      reached: p.reached ? Array.from(p.reached) : [], // names of corners reached
+    }));
+
+    // Deep copy board (tracks, rotations, owners, tokens)
+    const board = [];
+    for (let y=0; y<state.N; y++) {
+      const row = [];
+      for (let x=0; x<state.N; x++) {
+        const c = state.board[y][x] || {};
+        row.push({
+          track: c.track ?? null,
+          rot: c.rot|0,
+          owner: (c.owner==null? null : c.owner|0),
+          token: (c.token==null? null : c.token|0),
+        });
+      }
+      board.push(row);
+    }
+
+    return {
+      __rr_version: 1,
+      savedAt: new Date().toISOString(),
+      N: state.N,
+      current: state.current|0,
+      players,
+      board,
+      // Corner/seal bookkeeping
+      cornerLockTurns: Array.isArray(state.cornerLockTurns) ? [...state.cornerLockTurns] : null,
+      cornerSealed: Array.isArray(state.cornerSealed) ? [...state.cornerSealed] : null,
+      // We intentionally DO NOT persist: phase, subphase, highlights, die, animations, hover, etc.
+    };
+  }
+
+  // Download a JSON file (no server needed)
+  function downloadJSON(obj, filename) {
+    const blob = new Blob([JSON.stringify(obj, null, 2)], {type: 'application/json'});
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url; a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    setTimeout(() => {
+      URL.revokeObjectURL(url);
+      document.body.removeChild(a);
+    }, 0);
+  }
+
+  function saveGame() {
+    const snap = snapshotState();
+    const name = `RotoRouter_${snap.N}x${snap.N}_${snap.savedAt.replace(/[:.]/g,'-')}.json`;
+    downloadJSON(snap, name);
+    toast('Game saved.');
+  }
+
+  // Apply a snapshot back into our live state (safe restore)
+  function applySnapshot(snap) {
+    // Basic validation
+    if (!snap || typeof snap !== 'object' || snap.__rr_version == null) {
+      throw new Error('Not a valid RotoRouter save file.');
+    }
+    if (!Number.isInteger(snap.N) || !Array.isArray(snap.board) || !Array.isArray(snap.players)) {
+      throw new Error('Save is missing required fields.');
+    }
+
+    // Resize board if needed & sync dropdown
+    state.N = snap.N;
+    const sizeSel = UI.boardSize();
+    if (sizeSel) {
+      const opt = [...sizeSel.options].find(o => parseInt(o.value,10) === state.N);
+      if (opt) sizeSel.value = String(state.N);
+    }
+
+    // Restore board
+    state.board = makeBoard(state.N);
+    for (let y=0; y<state.N; y++) {
+      for (let x=0; x<state.N; x++) {
+        const s = (snap.board[y] && snap.board[y][x]) || {};
+        state.board[y][x] = {
+          track: s.track ?? null,
+          rot: (s.rot|0) % 360,
+          owner: (s.owner==null? null : s.owner|0),
+          token: (s.token==null? null : s.token|0),
+        };
+      }
+    }
+
+    // Restore players (keep order aligned with PLAYERS by id)
+    state.players = PLAYERS.map((baseP) => {
+      const from = snap.players.find(pp => pp.id === baseP.id) || {};
+      return {
+        id: baseP.id,
+        name: baseP.name,
+        color: baseP.color,
+        pocket: baseP.pocket,
+        deck: {
+          draw: [...(from.deck?.draw || [])],
+          discard: [...(from.deck?.discard || [])],
+        },
+        drawn: from.drawn ?? null,
+        tokens: from.tokens|0,
+        drawLocked: !!from.drawLocked,
+        drawUsed: !!from.drawUsed,
+        tokenUsed: !!from.tokenUsed,
+        rollUsed: !!from.rollUsed,
+        skipCount: from.skipCount|0,
+        elbowSkipCount: from.elbowSkipCount|0,
+        forceElbow: !!from.forceElbow,
+        reached: new Set(from.reached || []),
+      };
+    });
+
+    // Turn + corner bookkeeping
+    state.current = (snap.current|0) % state.players.length;
+    state.cornerLockTurns = Array.isArray(snap.cornerLockTurns)
+      ? snap.cornerLockTurns.slice(0, PLAYERS.length)
+      : PLAYERS.map(()=>0);
+    state.cornerSealed = Array.isArray(snap.cornerSealed)
+      ? snap.cornerSealed.slice(0, PLAYERS.length)
+      : PLAYERS.map(()=>false);
+
+    // Reset transients/animations/UI-phase safely
+    state.phase = 'idle';
+    state.subphase = null;
+    state.highlight = [];
+    state.hover = null;
+    state.forcePlace = false;
+    state.previewRot = 0;
+    state.die = null;
+    state.tokenSelect = null;
+    state.rotateFocus = null;
+    state.turnAdvancing = false;
+    state.rotAnims = [];
+    state.ghostRotAnim = null;
+
+    // Recompute saturation immediately after restore
+    refreshBoardSaturation();
+
+    // Recompute any topology-derived hints (e.g., seals)
+    if (typeof onTopologyChanged === 'function') onTopologyChanged();
+
+    // Resize canvas for the (possibly) new N and redraw
+    resize();
+    updateHUD();
+    setStatus('Game loaded.');
+    render();
+    // Ensure per-turn checks (including corner seal) run immediately after a load
+    startTurn();    
+  }
+
+  function loadFromFile(file) {
+    const reader = new FileReader();
+    reader.onload = () => {
+      try {
+        const snap = JSON.parse(reader.result);
+        applySnapshot(snap);
+        toast('Save loaded successfully.');
+      } catch (err) {
+        console.error(err);
+        toast('Failed to load: ' + err.message);
+        setStatus('Load error: ' + err.message);
+      }
+    };
+    reader.readAsText(file);
+  }
+
+
   function resize(){
     const rightW = window.innerWidth - 360; const h = window.innerHeight;
     const size = Math.min(rightW, h) * 0.95;
@@ -224,6 +424,81 @@ function cornerFor(pid){
   }
   function owned(pid){ const out=[]; for(let y=0;y<state.N;y++) for(let x=0;x<state.N;x++){ const c=state.board[y][x]; if(c.track && c.owner===pid) out.push({x,y}); } return out; }
   function within(x,y){ return x>=0 && y>=0 && x<state.N && y<state.N; }
+
+  // ---- Dead-Straight detection helpers (STRICT: "trapped straight") ----
+  function isStraightHorizontal(cell){
+    return !!cell && cell.track === 'Straight' && ((cell.rot|0) % 180 === 0); // 0 or 180
+  }
+  function isStraightVertical(cell){
+    return !!cell && cell.track === 'Straight' && ((cell.rot|0) % 180 !== 0); // 90 or 270
+  }
+
+  // STRICT + BORDER rule:
+  // A Straight at (x,y) is “trapped” iff:
+  // • Every *present* orthogonal neighbor is a Straight oriented perpendicular to the center, AND
+  // • At least 3 neighbors are present (so corners with only 2 neighbors never qualify).
+  // This covers:
+  //   – Inner cells: need all 4 neighbors, all perpendicular (classic case).
+  //   – Border cells: 3 in-bounds neighbors, all perpendicular ⇒ trapped.
+  //   – Corner cells: only 2 neighbors ⇒ never trapped.
+  function isTrappedStraight(x, y) {
+    const c = state.board[y][x];
+    if (!c || c.track !== 'Straight') return false;
+
+    const centerIsH = isStraightHorizontal(c);
+
+    // Describe the 4 orthogonal neighbors with bounds checks
+    const neigh = [
+      { nx: x - 1, ny: y,     need: centerIsH ? isStraightVertical : isStraightHorizontal }, // L
+      { nx: x + 1, ny: y,     need: centerIsH ? isStraightVertical : isStraightHorizontal }, // R
+      { nx: x,     ny: y - 1, need: centerIsH ? isStraightVertical : isStraightHorizontal }, // U
+      { nx: x,     ny: y + 1, need: centerIsH ? isStraightVertical : isStraightHorizontal }, // D
+    ];
+
+    let present = 0;
+
+    for (const n of neigh) {
+      if (!within(n.nx, n.ny)) continue;           // out-of-bounds neighbor simply doesn't exist
+      present++;
+      const cell = state.board[n.ny][n.nx];
+      if (!n.need(cell)) return false;             // present neighbor must be a Straight, perpendicular
+    }
+
+    // Require at least 3 present neighbors to count as trapped.
+    // This allows border (3-side) traps and inner (4-side) traps, but excludes corners (2).
+    return present >= 3;
+  }
+
+  function findAllTrappedStraights(){
+    const out = [];
+    for (let y=0; y<state.N; y++){
+      for (let x=0; x<state.N; x++){
+        if (isTrappedStraight(x,y)) out.push({x,y});
+      }
+    }
+    return out;
+  }
+
+  function isBoardFullyTracked(){
+    for (let y=0; y<state.N; y++){
+      for (let x=0; x<state.N; x++){
+        const c = state.board[y][x];
+        if (!c.track) return false;
+      }
+    }
+    return true;
+  }
+
+  // Keep a cached flag on state
+  state.boardSaturated = false;
+  function refreshBoardSaturation(){
+    const was = !!state.boardSaturated;
+    state.boardSaturated = isBoardFullyTracked();
+    if (!was && state.boardSaturated){
+      setStatus('Board is full of tracks — drawing/placing tracks is now disabled. Tokens and rotations still allowed.');
+      toast('Board fully tracked: track placement locked.');
+    }
+  }
 
   // Count tokens for a player
   function countTokens(pid){
@@ -288,10 +563,12 @@ function cornerFor(pid){
     state.cornerSealed    = PLAYERS.map(() => false);
     state.current = 0;
     startTurn();
+    setStatus('New Game → Draw → Place. First placement is your corner.');
     state.rotAnims = [];
     state.ghostRotAnim = null;
     state._animating = false;
     if (Array.isArray(state.players)) for (const pl of state.players) pl.tokens = 0;
+    refreshBoardSaturation();
   }
 
   function startTurn(){
@@ -315,7 +592,26 @@ function cornerFor(pid){
     if (isCornerSealed(P.id)) {
       startCornerFixCross(P.id);
       return; // fix subphase renders/locks HUD
-    }    
+    }
+    // --- Dead-Straight Fix (STRICT: trapped straight) ---
+    if (state.phase !== 'cornerFix'){ // don't collide with Corner Fix UI
+      const trapped = findAllTrappedStraights();
+      if (trapped.length){
+        state.phase    = 'deadFix';
+        state.subphase = 'pickDeadStraight';
+        state.highlight = trapped;
+
+        const msg = 'Dead-Straight Fix: replace ONE highlighted Straight with a Cross (free).';
+        setStatus(msg);
+        toast(msg);
+
+        render();
+        updateHUD();
+        return; // wait for the click on one of the highlighted cells
+      }
+    }
+    // --- end Dead-Straight Fix ---
+    // --- end Dead-Straight Fix ---        
     updateHUD();
   }
 
@@ -334,8 +630,10 @@ function cornerFor(pid){
 
     state.current=(state.current+1)%state.players.length;
     startTurn();
-    // Don't overwrite Corner Fix warning after startTurn()
-    if (state.phase !== 'cornerFix') setStatus('Turn passed.');
+    // Don't overwrite Corner or Dead-Straight Fix prompts after startTurn()
+    if (state.phase !== 'cornerFix' && state.phase !== 'deadFix') {
+      setStatus('Turn passed.');
+    }
     state.turnAdvancing=false;
   }
 
@@ -347,6 +645,7 @@ function cornerFor(pid){
 
   // Draw (1/turn)
   function drawCard(){
+    if (state.boardSaturated){ setStatus('Board is full of tracks — drawing is disabled.'); toast('Draw disabled (board full)'); return; }
     const P=currentPlayer();
     if(P.drawLocked && !state.forcePlace){ setStatus('You bottomed this turn; drawing is locked until End Turn.'); return; }
     if(P.drawUsed   && !state.forcePlace){ setStatus('You have already drawn this turn. End Turn to draw again next turn.'); return; }
@@ -477,6 +776,7 @@ function onTopologyChanged(){
       toast(PLAYERS[pid].name + " corner sealed — corner will be auto-fixed on their next turn.", 4500);      
     }
   }
+  refreshBoardSaturation();
 }
 
 // Correctly compute placement highlight positions applying these rules:
@@ -591,7 +891,7 @@ function isTrackCard(card){
 function checkForcePlace(){
   // === FORCE-DRAW RULE (anchor: RR_FORCE_DRAW) ===
   const P = currentPlayer();
-  state.forcePlace = (P.skipCount >= 3);
+  state.forcePlace = (!state.boardSaturated) && (P.skipCount >= 3);
   // If forced and no card in hand, allow drawing even if bottom locked
   if (state.forcePlace && !P.drawn) {
     P.drawLocked = false;   // unloack Draw
@@ -601,16 +901,18 @@ function checkForcePlace(){
 
 function checkForceElbow(P){
   // Set a persistent flag once the player has skipped 3 elbows.
-  P.forceElbow = (P.elbowSkipCount >= 3);
+  P.forceElbow = (!state.boardSaturated) && (P.elbowSkipCount >= 3);
 }
 
   function placeMode(){
+    if (state.boardSaturated){ setStatus('Board is full of tracks — placement disabled.'); toast('Place disabled (board full)'); return; }
     const P=currentPlayer();
     if(!P.drawn){ setStatus('Draw a card first.'); return; }
     state.phase='place'; state.subphase=null; computePlaceHighlights(); updateHUD(); setStatus('Placement: hover to preview, click to confirm. Rotate with Q/E.');
   }
 
   function bottomCard(){
+    if (state.boardSaturated){ setStatus('Board is full of tracks — bottoming is disabled.'); toast('Bottom disabled (board full)'); return; }
     const P=currentPlayer();
     if(!P.drawn){ setStatus('Nothing to bottom.'); return; }
     const bottomed = P.drawn;            // capture BEFORE clearing
@@ -803,7 +1105,33 @@ function checkForceElbow(P){
       if (typeof onTopologyChanged === 'function') onTopologyChanged();
       render(); updateHUD(); setStatus('Corner fixed: Cross placed.');
       return;
-    }    
+    }
+    
+    // Dead-Straight Fix click (one free replacement per turn)
+    if (state.phase === 'deadFix' && state.subphase === 'pickDeadStraight'){
+      const hit = state.highlight && state.highlight.some(h => h.x===x && h.y===y);
+      if (hit){
+        const cell = state.board[y][x];
+        // Replace the Straight with a Cross; keep owner & token intact
+        cell.track = 'Cross';
+        cell.rot   = 0;   // Cross is symmetric
+        // owner, token remain unchanged
+
+        toast('Dead-Straight fixed: placed Cross.');
+
+        // Clear subphase; resume normal turn
+        state.phase = 'idle';
+        state.subphase = null;
+        state.highlight = [];
+        state.hover = null;
+
+        if (typeof onTopologyChanged === 'function') onTopologyChanged();
+        render();
+        updateHUD();
+        setStatus('Dead-Straight fixed. Continue your turn.');
+      }
+      return; // consume click during deadFix phase
+    }
 
     // PLACE phase
     if(state.phase==='place')
@@ -1013,8 +1341,63 @@ function checkForceElbow(P){
   btn('applyBtn').addEventListener('click', applyRotation);
   UI.vizEdges().addEventListener('change', render);
 
+  btn('saveBtn').addEventListener('click', saveGame);
+  btn('loadBtn').addEventListener('click', () => document.getElementById('loadFile').click());
+  document.getElementById('loadFile').addEventListener('change', (e) => {
+    const f = e.target.files && e.target.files[0];
+    if (f) loadFromFile(f);
+    e.target.value = ''; // reset so the same file can be chosen again later
+  });
+
   function updateHUD(){
     const P=currentPlayer();
+
+    if (state.phase === 'deadFix'){
+      // Keep the messaging visible while the selection is up
+      drawTag().textContent = state.boardSaturated
+        ? 'Draw: Locked (Dead-Straight Fix)'
+        : 'Draw: Ready (Dead-Straight Fix)';
+      setStatus('Dead-Straight Fix: replace ONE highlighted Straight with a Cross (free).');
+      render();
+      return; // ← prevent later HUD paths from overwriting this status
+    }
+
+    if (state.boardSaturated){
+      // Tags
+      drawTag().textContent = state.phase === 'deadFix'
+        ? 'Draw: Locked (Dead-Straight Fix)'
+        : 'Draw: Locked (Board Full)';
+
+      // Basic tags that should still reflect current state
+      turnTag().textContent  = 'Turn: ' + currentPlayer().name + ' (' + currentPlayer().pocket + ')';
+      phaseTag().textContent = 'Phase: ' + state.phase;
+      dieTag().textContent   = 'Die: ' + (state.die || '—');
+      rollTag().textContent  = 'Roll: ' + (currentPlayer().rollUsed ? 'Used' : 'Ready');
+      tokenTag().textContent = 'Token: ' + (currentPlayer().tokenUsed ? 'Used' : 'Ready');
+
+      // Score tag MUST keep updating even when board is full
+      (function(){
+        const el = document.getElementById('scoreTag');
+        if(!el) return;
+        const P = currentPlayer();
+        const reached = P.reached ? P.reached : new Set();
+        const list = (reached && reached.size) ? Array.from(reached).map(n=>n[0]).join(', ') : '';
+        el.textContent = 'Score: ' + (reached ? reached.size : 0) + '/3' + (list ? (' ['+list+']') : '');
+      })();
+
+      // Buttons
+      btn('drawBtn').disabled   = true;
+      btn('placeBtn').disabled  = true;
+      btn('bottomBtn').disabled = true;
+      endTurnBtn.disabled = false;
+      overrideBtn.style.display = 'none';
+      btn('tokenBtn').disabled = !!currentPlayer().tokenUsed;
+      btn('rollBtn').disabled  = !!currentPlayer().rollUsed;
+      btn('applyBtn').disabled = !(state.die && state.die!=='X');
+
+      render();
+      return; // keep the early-out
+    }
 
     // Corner Fix HUD lock: show a RED warning and disable all actions until the free Cross is applied
     if (state.phase === 'cornerFix'){

@@ -1,0 +1,606 @@
+{
+  "__rr_version": 1,
+  "savedAt": "2025-09-25T05:36:55.164915Z",
+  "N": 9,
+  "current": 0,
+  "players": [
+    {
+      "id": 0,
+      "name": "Red",
+      "color": "#ff6b6b",
+      "pocket": "NW",
+      "deck": {
+        "draw": [],
+        "discard": []
+      },
+      "drawn": null,
+      "tokens": 0,
+      "drawLocked": false,
+      "drawUsed": false,
+      "tokenUsed": false,
+      "rollUsed": false,
+      "skipCount": 0,
+      "elbowSkipCount": 0,
+      "forceElbow": false,
+      "reached": []
+    },
+    {
+      "id": 1,
+      "name": "Green",
+      "color": "#6bff95",
+      "pocket": "NE",
+      "deck": {
+        "draw": [],
+        "discard": []
+      },
+      "drawn": null,
+      "tokens": 0,
+      "drawLocked": false,
+      "drawUsed": false,
+      "tokenUsed": false,
+      "rollUsed": false,
+      "skipCount": 0,
+      "elbowSkipCount": 0,
+      "forceElbow": false,
+      "reached": []
+    },
+    {
+      "id": 2,
+      "name": "Blue",
+      "color": "#6bd9ff",
+      "pocket": "SE",
+      "deck": {
+        "draw": [],
+        "discard": []
+      },
+      "drawn": null,
+      "tokens": 0,
+      "drawLocked": false,
+      "drawUsed": false,
+      "tokenUsed": false,
+      "rollUsed": false,
+      "skipCount": 0,
+      "elbowSkipCount": 0,
+      "forceElbow": false,
+      "reached": []
+    },
+    {
+      "id": 3,
+      "name": "Yellow",
+      "color": "#ffef6b",
+      "pocket": "SW",
+      "deck": {
+        "draw": [],
+        "discard": []
+      },
+      "drawn": null,
+      "tokens": 0,
+      "drawLocked": false,
+      "drawUsed": false,
+      "tokenUsed": false,
+      "rollUsed": false,
+      "skipCount": 0,
+      "elbowSkipCount": 0,
+      "forceElbow": false,
+      "reached": []
+    }
+  ],
+  "board": [
+    [
+      {
+        "track": "Straight",
+        "rot": 0,
+        "owner": null,
+        "token": null
+      },
+      {
+        "track": "Straight",
+        "rot": 90,
+        "owner": null,
+        "token": null
+      },
+      {
+        "track": "Straight",
+        "rot": 0,
+        "owner": null,
+        "token": null
+      },
+      {
+        "track": "Straight",
+        "rot": 90,
+        "owner": null,
+        "token": null
+      },
+      {
+        "track": "Straight",
+        "rot": 0,
+        "owner": null,
+        "token": null
+      },
+      {
+        "track": "Straight",
+        "rot": 90,
+        "owner": null,
+        "token": null
+      },
+      {
+        "track": "Straight",
+        "rot": 0,
+        "owner": null,
+        "token": null
+      },
+      {
+        "track": "Straight",
+        "rot": 90,
+        "owner": null,
+        "token": null
+      },
+      {
+        "track": "Straight",
+        "rot": 0,
+        "owner": null,
+        "token": null
+      }
+    ],
+    [
+      {
+        "track": "Straight",
+        "rot": 90,
+        "owner": null,
+        "token": null
+      },
+      {
+        "track": "Straight",
+        "rot": 0,
+        "owner": null,
+        "token": null
+      },
+      {
+        "track": "Straight",
+        "rot": 90,
+        "owner": null,
+        "token": null
+      },
+      {
+        "track": "Straight",
+        "rot": 0,
+        "owner": null,
+        "token": null
+      },
+      {
+        "track": "Straight",
+        "rot": 90,
+        "owner": null,
+        "token": null
+      },
+      {
+        "track": "Straight",
+        "rot": 0,
+        "owner": null,
+        "token": null
+      },
+      {
+        "track": "Straight",
+        "rot": 90,
+        "owner": null,
+        "token": null
+      },
+      {
+        "track": "Straight",
+        "rot": 0,
+        "owner": null,
+        "token": null
+      },
+      {
+        "track": "Straight",
+        "rot": 90,
+        "owner": null,
+        "token": null
+      }
+    ],
+    [
+      {
+        "track": "Straight",
+        "rot": 0,
+        "owner": null,
+        "token": null
+      },
+      {
+        "track": "Straight",
+        "rot": 90,
+        "owner": null,
+        "token": null
+      },
+      {
+        "track": "Straight",
+        "rot": 0,
+        "owner": null,
+        "token": null
+      },
+      {
+        "track": "Straight",
+        "rot": 90,
+        "owner": null,
+        "token": null
+      },
+      {
+        "track": "Straight",
+        "rot": 0,
+        "owner": null,
+        "token": null
+      },
+      {
+        "track": "Straight",
+        "rot": 90,
+        "owner": null,
+        "token": null
+      },
+      {
+        "track": "Straight",
+        "rot": 0,
+        "owner": null,
+        "token": null
+      },
+      {
+        "track": "Straight",
+        "rot": 90,
+        "owner": null,
+        "token": null
+      },
+      {
+        "track": "Straight",
+        "rot": 0,
+        "owner": null,
+        "token": null
+      }
+    ],
+    [
+      {
+        "track": "Straight",
+        "rot": 90,
+        "owner": null,
+        "token": null
+      },
+      {
+        "track": "Straight",
+        "rot": 0,
+        "owner": null,
+        "token": null
+      },
+      {
+        "track": "Straight",
+        "rot": 90,
+        "owner": null,
+        "token": null
+      },
+      {
+        "track": "Straight",
+        "rot": 0,
+        "owner": null,
+        "token": null
+      },
+      {
+        "track": "Straight",
+        "rot": 90,
+        "owner": null,
+        "token": null
+      },
+      {
+        "track": "Straight",
+        "rot": 0,
+        "owner": null,
+        "token": null
+      },
+      {
+        "track": "Straight",
+        "rot": 90,
+        "owner": null,
+        "token": null
+      },
+      {
+        "track": "Straight",
+        "rot": 0,
+        "owner": null,
+        "token": null
+      },
+      {
+        "track": "Straight",
+        "rot": 90,
+        "owner": null,
+        "token": null
+      }
+    ],
+    [
+      {
+        "track": "Straight",
+        "rot": 0,
+        "owner": null,
+        "token": null
+      },
+      {
+        "track": "Straight",
+        "rot": 90,
+        "owner": null,
+        "token": null
+      },
+      {
+        "track": "Straight",
+        "rot": 0,
+        "owner": null,
+        "token": null
+      },
+      {
+        "track": "Straight",
+        "rot": 90,
+        "owner": null,
+        "token": null
+      },
+      {
+        "track": "Straight",
+        "rot": 0,
+        "owner": null,
+        "token": null
+      },
+      {
+        "track": "Straight",
+        "rot": 90,
+        "owner": null,
+        "token": null
+      },
+      {
+        "track": "Straight",
+        "rot": 0,
+        "owner": null,
+        "token": null
+      },
+      {
+        "track": "Straight",
+        "rot": 90,
+        "owner": null,
+        "token": null
+      },
+      {
+        "track": "Straight",
+        "rot": 0,
+        "owner": null,
+        "token": null
+      }
+    ],
+    [
+      {
+        "track": "Straight",
+        "rot": 90,
+        "owner": null,
+        "token": null
+      },
+      {
+        "track": "Straight",
+        "rot": 0,
+        "owner": null,
+        "token": null
+      },
+      {
+        "track": "Straight",
+        "rot": 90,
+        "owner": null,
+        "token": null
+      },
+      {
+        "track": "Straight",
+        "rot": 0,
+        "owner": null,
+        "token": null
+      },
+      {
+        "track": "Straight",
+        "rot": 90,
+        "owner": null,
+        "token": null
+      },
+      {
+        "track": "Straight",
+        "rot": 0,
+        "owner": null,
+        "token": null
+      },
+      {
+        "track": "Straight",
+        "rot": 90,
+        "owner": null,
+        "token": null
+      },
+      {
+        "track": "Straight",
+        "rot": 0,
+        "owner": null,
+        "token": null
+      },
+      {
+        "track": "Straight",
+        "rot": 90,
+        "owner": null,
+        "token": null
+      }
+    ],
+    [
+      {
+        "track": "Straight",
+        "rot": 0,
+        "owner": null,
+        "token": null
+      },
+      {
+        "track": "Straight",
+        "rot": 90,
+        "owner": null,
+        "token": null
+      },
+      {
+        "track": "Straight",
+        "rot": 0,
+        "owner": null,
+        "token": null
+      },
+      {
+        "track": "Straight",
+        "rot": 90,
+        "owner": null,
+        "token": null
+      },
+      {
+        "track": "Straight",
+        "rot": 0,
+        "owner": null,
+        "token": null
+      },
+      {
+        "track": "Straight",
+        "rot": 90,
+        "owner": null,
+        "token": null
+      },
+      {
+        "track": "Straight",
+        "rot": 0,
+        "owner": null,
+        "token": null
+      },
+      {
+        "track": "Straight",
+        "rot": 90,
+        "owner": null,
+        "token": null
+      },
+      {
+        "track": "Straight",
+        "rot": 0,
+        "owner": null,
+        "token": null
+      }
+    ],
+    [
+      {
+        "track": "Straight",
+        "rot": 90,
+        "owner": null,
+        "token": null
+      },
+      {
+        "track": "Straight",
+        "rot": 0,
+        "owner": null,
+        "token": null
+      },
+      {
+        "track": "Straight",
+        "rot": 90,
+        "owner": null,
+        "token": null
+      },
+      {
+        "track": "Straight",
+        "rot": 0,
+        "owner": null,
+        "token": null
+      },
+      {
+        "track": "Straight",
+        "rot": 90,
+        "owner": null,
+        "token": null
+      },
+      {
+        "track": "Straight",
+        "rot": 0,
+        "owner": null,
+        "token": null
+      },
+      {
+        "track": "Straight",
+        "rot": 90,
+        "owner": null,
+        "token": null
+      },
+      {
+        "track": "Straight",
+        "rot": 0,
+        "owner": null,
+        "token": null
+      },
+      {
+        "track": "Straight",
+        "rot": 90,
+        "owner": null,
+        "token": null
+      }
+    ],
+    [
+      {
+        "track": "Straight",
+        "rot": 0,
+        "owner": null,
+        "token": null
+      },
+      {
+        "track": "Straight",
+        "rot": 90,
+        "owner": null,
+        "token": null
+      },
+      {
+        "track": "Straight",
+        "rot": 0,
+        "owner": null,
+        "token": null
+      },
+      {
+        "track": "Straight",
+        "rot": 90,
+        "owner": null,
+        "token": null
+      },
+      {
+        "track": "Straight",
+        "rot": 0,
+        "owner": null,
+        "token": null
+      },
+      {
+        "track": "Straight",
+        "rot": 90,
+        "owner": null,
+        "token": null
+      },
+      {
+        "track": "Straight",
+        "rot": 0,
+        "owner": null,
+        "token": null
+      },
+      {
+        "track": "Straight",
+        "rot": 90,
+        "owner": null,
+        "token": null
+      },
+      {
+        "track": "Straight",
+        "rot": 0,
+        "owner": null,
+        "token": null
+      }
+    ]
+  ],
+  "cornerLockTurns": [
+    0,
+    0,
+    0,
+    0
+  ],
+  "cornerSealed": [
+    false,
+    false,
+    false,
+    false
+  ]
+}

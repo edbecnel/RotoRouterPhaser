@@ -1,130 +1,88 @@
+# RotoRouter — No-Block Edition
 
-# RotoRouter — No‑Block Edition
+**Build:** 2025-09-25
 
-**Build:** 2025-09-23
-
-This build removes **Block** tracks and adds rules + UX to prevent soft‑locks while keeping games fast and readable.
-
----
-
-## Highlights
-- **Forced Draw** when *general* track skips reach **3/3** (Draw becomes **Ready (Forced)**; End Turn is disabled until a placement or Override when a card is in hand).
-- **Elbows Skipped (3/3)** → the next **Elbow** drawn **must be placed** that turn (Bottom/End Turn disabled).
-- **Corner access fairness**  
-  - **Non‑blocking corners:** A token resting on its **owner’s** corner does **not** block opponents from scoring there; the owner’s token remains.
-  - **Sealed corner auto‑fix:** A corner **Straight** jammed by **two perpendicular Straights** is auto‑flagged. On the owner’s **next turn** the UI enters **Corner Fix** and the corner is replaced **for free** with a **Cross** (owned by the corner’s player). Clear red warning shown until the fix is applied.
-- **RS/RE quality‑of‑life**  
-  - Click an existing **Straight/Elbow** with **RS/RE** in hand to enter **rotate‑existing** (tile is highlighted; ghost rotates with **Q/E**).  
-  - **Confirm‑click** commits the preview angle **without re‑animating** (no “snap back then spin”).
-- **RC improvements**  
-  - RC can **replace any existing track**.  
-  - RC can be **placed as a new Cross** on your **own empty corner**.  
-  - If your corner already has a track, RC can also be placed on any **empty orthogonal neighbor** of your corner.
-- **Animated ghosts**  
-  - Track ghost follows the cursor in **Place** and **tweens** smoothly on **Q/E** (no snap).  
-  - Token ghost appears during **Token** actions; both ghosts show a **dashed red box** on illegal cells.
-- **Visible rotations**  
-  - RS/RE preview rotates smoothly; board‑wide **Apply** uses slower, clearly visible tweens.
-- **Token Action safety**  
-  - Clicking **Token Action** with no legal target no longer advances the turn; a status + toast explains what’s missing.
-- **HUD polish**  
-  - Important warnings use red emphasis; the corner‑seal toast remains visible longer.  
-  - Helper line reads: “**Hover shows a ghost. Click to place. Rotate with Q/E.**” on a single line.
+This build adds **Save/Load**, the **Board Fully Tracked** lock, and the **Dead-Straight Fix** rule. It also notes a few **pre-existing bugs** that were corrected while integrating these features.
 
 ---
 
-## Rules in Detail
+## New features
 
-### 1) Forced Draw (3/3 general track skips)
-- If a player’s general `Skipped` counter hits **3**, **Draw** shows **Ready (Forced)**, **End Turn** is disabled (Override only when a card is in hand), and play cannot proceed until the player **Draws and Places**.  
-- After any placement, `Skipped` resets to **0**.
+### 1) Save / Load (local JSON)
+- **Save Game** downloads a JSON snapshot of the entire game state (board, rotations, ownership, tokens, per-player decks/hand/counters, turn, corner-seal bookkeeping).
+- **Load Game** restores the snapshot; transient UI/animations are reset so play resumes cleanly.
+- File schema: `__rr_version`, `savedAt`, `N`, `current`, `players[]`, `board[y][x]`, `cornerLockTurns[]`, `cornerSealed[]`.
 
-### 2) Elbows Skipped (3/3) → next Elbow must be placed
-- Bottoming an Elbow or ending the turn while holding one increments **Elbows Skipped**.
-- At **3/3**, the next **Elbow** drawn **must** be placed that turn. Bottom/End Turn are disabled until the Elbow is placed. Placing an Elbow resets the elbow counter.
+**How to use**
+1. Click **Save Game** in the sidebar to download a `.json` file.
+2. Click **Load Game** later and pick that file. Board size switches automatically to match the save.
 
-### 3) Corner access fairness
-- Moving a token onto an opponent’s corner **scores** for the mover even if the owner’s token already occupies that corner; the owner’s token is **not** removed.
-
-### 4) Sealed corner → Corner Fix (forced Cross)
-- **Detector:** corner tile is **Straight**, both adjacent tiles are **Straight** and **perpendicular** to the corner’s current orientation (explicit “perpendicular straights jam”).  
-- **Timing:** detection runs on each topology change (place/RS‑RE/RC/apply). On the **owner’s next turn**, the UI switches to **Corner Fix**: all actions are locked; a red warning instructs the player to click their corner; clicking replaces the corner with a **Cross** (free); play resumes.
-
-### 5) Token movement (BFS over pipes)
-- Tokens move along **reciprocally connected pipes**; **ownership does not matter** once networks connect.
-- Tokens may **traverse through** occupied cells but may **not stop** on them.  
-  - Exception: an opponent’s corner with **their** token is a **valid scoring terminal**.
-- If a selected token has **no reachable destinations**, we keep you in Token mode, re‑highlight only movable tokens (plus corner placement if legal), and show *“That token is stuck (no connected destinations). Choose a different token or click End Turn.”*
+**Sample file for testing**
+- 9×9 with every cell already containing a track:  
+  **RR_sample_full_board_9x9.json** (use the copy shared in this chat).
 
 ---
 
-## Controls & UI
+### 2) Board Fully Tracked — placement lock
+When **every cell on the board has a track**, track placement is locked:
+- **Draw / Place / Bottom** are **disabled**.
+- **Forced-Draw** (3 general skips) and **Elbow-force** (3 elbow skips) are **suppressed** while locked.
+- **Token Action** and **Roll / Apply** remain available.
 
-- **Draw / Place / Bottom** as usual.  
-- **Rotate (Q/E)** while hovering an empty cell in Place to rotate the **ghost**; animation ~**400 ms**.  
-- **RS/RE:** click an existing Straight/Elbow to select; rotate with Q/E; **click again to confirm**.  
-- **RC:** click any track to replace with a Cross, or click your **own empty corner** (or its orthogonal neighbors if your corner has a track) to place a new Cross.  
-- **Roll Die / Apply:** meshed rotation; neighbors alternate directions. Rotation tween ~**650 ms**.  
-- **Show connection edges** checkbox helps visualize pipe connectivity.
-- Sidebar helper: **“Hover shows a ghost. Click to place. Rotate with Q/E.”**
+Lock detection runs on **New Game**, **Load**, and after any topology change (place, RC/RS/RE, Apply). The HUD shows **“Draw: Locked (Board Full)”** and disables the track-placement buttons.
 
 ---
 
-## Recommended Deck Composition (per player)
+### 3) Dead-Straight Fix (rule)
+A **trapped straight** is a **Straight** that is surrounded by **perpendicular Straights**:
 
-Balanced starting counts that scale with board size and current rules.
+- **Inner cell:** all **4** orthogonal neighbors exist and are perpendicular Straights.  
+- **Border cell:** exactly **3** in-bounds neighbors exist and all 3 are perpendicular Straights.  
+- **Corner cell:** only 2 neighbors → **never** qualifies.
 
-### 9×9 board
-- Straight: **13**  
-- Elbow: **8**  
-- RStraight: **4**  
-- RElbow: **3**  
-- Cross: **2**  
-- RCross: **2**  
-**Total:** 32 cards
+At the **start of your turn**, if any trapped straights exist:
 
-### 7×7 board
-- Straight: **10**  
-- Elbow: **6**  
-- RStraight: **3**  
-- RElbow: **2**  
-- Cross: **2**  
-- RCross: **1**  
-**Total:** 24 cards
+- You may replace **exactly one** highlighted trapped straight with a **Cross** (free).
+- Tokens on that cell **remain**.
+- If trapped straights remain, each subsequent player may fix **one** on their turn until none remain.
+- Works whether or not the board is fully tracked.
 
-**Tuning knobs**
-- More flexibility: +1 **RStraight** and +1 **RElbow**.  
-- Faster jam‑breaking (9×9): +1 **Cross** (keep **RCross** rare).  
-- Shorter 7×7: **Straight 9**, **Elbow 5** (total 22).
-
-**Optional: auto‑sized deck**
-
-```js
-function makeDeck(size){
-  const cfgMap = {{
-    7: {{ Straight:10, Elbow:6, RStraight:3, RElbow:2, Cross:2, RCross:1 }},
-    9: {{ Straight:13, Elbow:8, RStraight:4, RElbow:3, Cross:2, RCross:2 }},
-  }};
-  const cfg = cfgMap[size] || (size <= 7 ? cfgMap[7] : cfgMap[9]);
-  return {{ /* build deck from cfg */ }};
-}
-```
+**UI flow**
+- Turn start highlights all eligible cells and prompts:  
+  *“Dead-Straight Fix: replace ONE highlighted Straight with a Cross (free).”*
+- Click a highlighted cell to apply the fix; normal actions then resume.
 
 ---
 
-## Changelog
-- **2025-09-23**
-  - Animated **track ghost** on Q/E; always‑visible drag ghost with illegal dashed box.
-  - **Token ghost** during Token actions; dashed illegal indication.
-  - **RS/RE**: confirm‑click commits preview angle (no extra spin); highlighted selection.
-  - **RC**: may place Cross on **own empty corner** and on **empty orthogonal neighbors** if the corner already has a track.
-  - Token movement uses **BFS over pipes**, ignoring ownership; pass‑through over tokens; can stop on opponent’s own corner for scoring.
-  - Corner‑fix warning + longer‑lived toast.
-  - Helper hint forced to a **single line** (no stray space before the period).
-- **2025‑09‑23** Consolidated rules, deck recommendations, and HUD notes.
-- Earlier: Force Draw & Elbow‑force; Non‑blocking corners.
+## Pre-existing bugs fixed during integration
+
+> These issues existed prior to today’s feature additions and were corrected while wiring up Save/Load and the lock logic.
+
+1. **Load dialog reported “Not a valid RotoRouter save file.”**  
+   Cause: a stray `applySnapshot();` self-call inside `applySnapshot(snap)` threw an exception after a successful parse.  
+   Fix: removed the self-call; loader now applies the snapshot cleanly.
+
+2. **Corner-seal (“Corner Fix”) only triggered on the *next* player’s turn after a Load.**  
+   Cause: turn-start checks weren’t re-run immediately after applying a snapshot.  
+   Fix: after `applySnapshot(snap)`, we call `startTurn()` so Corner Fix can trigger right away when needed.
+
+3. **Draw/Place remained enabled immediately after loading a full-board save.**  
+   Cause: board-saturation wasn’t recomputed early enough during load.  
+   Fix: call `refreshBoardSaturation()` promptly during `applySnapshot(snap)` and then update HUD; Draw/Place/Bottom disable instantly.
+
+> Note: We intentionally did **not** list fixes created as part of *today’s* new features; those will be documented alongside their feature commits when you push this build.
+
+---
+
+## Deck recommendations (unchanged)
+
+### 9×9
+- Straight **13**, Elbow **8**, RS **4**, RE **3**, Cross **2**, RCross **2** — total **32**
+
+### 7×7
+- Straight **10**, Elbow **6**, RS **3**, RE **2**, Cross **2**, RCross **1** — total **24**
 
 ---
 
 ## Run
-Open **`RotoRouter.html`** in a modern desktop browser. Hard‑refresh (Ctrl/Cmd+Shift+R) after swapping files.
+Open **`RotoRouter.html`** in a modern desktop browser. Hard-refresh (Ctrl/Cmd+Shift+R) after swapping files.
