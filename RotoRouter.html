@@ -115,11 +115,38 @@
       </div>
 
       <h2>Corners</h2>
-      <div class="panel small legend">
-        <span class="dot" style="background:#ff6b6b"></span><div>Red — NW (0,0)</div>
-        <span class="dot" style="background:#6bff95"></span><div>Green — NE (N-1,0)</div>
-        <span class="dot" style="background:#6bd9ff"></span><div>Blue — SE (N-1,N-1)</div>
-        <span class="dot" style="background:#ffef6b"></span><div>Yellow — SW (0,N-1)</div>
+      <div class="panel">
+        <table class="scoreTable" id="cornerScoreTable" style="width:100%; border-collapse:collapse;">
+          <thead>
+            <tr>
+              <th style="text-align:left;">Color</th>
+              <th style="text-align:left;">Quadrant</th>
+              <th style="text-align:right;">Score</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr data-pid="0">
+              <td><span class="dot" style="background:#ff6b6b"></span> Red</td>
+              <td id="quad-0">—</td>
+              <td id="score-0" style="text-align:right;">0/3</td>
+            </tr>
+            <tr data-pid="1">
+              <td><span class="dot" style="background:#6bff95"></span> Green</td>
+              <td id="quad-1">—</td>
+              <td id="score-1" style="text-align:right;">0/3</td>
+            </tr>
+            <tr data-pid="2">
+              <td><span class="dot" style="background:#6bd9ff"></span> Blue</td>
+              <td id="quad-2">—</td>
+              <td id="score-2" style="text-align:right;">0/3</td>
+            </tr>
+            <tr data-pid="3">
+              <td><span class="dot" style="background:#ffef6b"></span> Yellow</td>
+              <td id="quad-3">—</td>
+              <td id="score-3" style="text-align:right;">0/3</td>
+            </tr>
+          </tbody>
+        </table>
       </div>
     </aside>
     <main id="game"><canvas id="board"></canvas></main>
@@ -574,14 +601,9 @@
     updateHUD();
 
     if (opts && opts.fromHistory) {
-      // After UNDO, resume Dead-Straight Fix if eligible (highlights/prompt return)
-      if (opts.op === 'undo') {
-        maybeResumeDeadFixAfterHistory();
-      }
-      // After REDO, re-enter start-of-turn fix phases (Corner Fix or Dead-Straight Fix) if eligible
-      else if (opts.op === 'redo') {
-        maybeEnterFixPhasesAfterRedo();
-      }
+      // After UNDO/REDO, re-enter fix phases (Corner Fix then Dead-Straight Fix) if eligible
+      maybeEnterFixPhasesAfterHistory(opts.op);
+
       // If we are not in a fix subphase, show the provided status (e.g., “Redid (Global)”).
       if (state.phase !== 'cornerFix' && state.phase !== 'deadFix' && opts.status) {
         setStatus(opts.status);
@@ -696,45 +718,17 @@ function cornerFor(pid){
     return out;
   }
 
-  // Re-enter the Dead-Straight Fix subphase after an undo/redo,
-  // if eligible (i.e., there are trapped straights on the board).
-  function maybeResumeDeadFixAfterHistory(){
-    if (state.deadFixDoneThisTurn) return;   // player already used the free fix this turn
-
-    // Don't collide with Corner Fix or while the turn is advancing
-    if (state.phase === 'cornerFix' || state.turnAdvancing) return;
-
-    // Only resume when we're otherwise idle (e.g., after undo)
-    if (state.phase !== 'idle') return;
-
-    const trapped = (typeof findAllTrappedStraights === 'function')
-      ? findAllTrappedStraights()
-      : [];
-
-    if (!trapped.length) return;
-
-    state.phase    = 'deadFix';
-    state.subphase = 'pickDeadStraight';
-    state.highlight = trapped;
-
-    const msg = 'Dead-Straight Fix: replace ONE highlighted Straight with a Cross (free).';
-    setStatus(msg);
-    render();
-    updateHUD(); // keeps the Draw tag as "Locked (Dead-Straight Fix)" when board is full
-  }
-
-  // Re-enter fix subphases after a REDO when we're idle.
-  // We avoid startTurn() here to keep undo/redo stacks intact.
-  function maybeEnterFixPhasesAfterRedo(){
+    // --- replace the entire maybeResumeDeadFixAfterHistory() with this unified helper ---
+  function maybeEnterFixPhasesAfterHistory(op){
     if (state.turnAdvancing) return;
     if (state.phase !== 'idle') return;
 
     const P = currentPlayer();
 
-    // Corner Fix first (don’t collide with Dead-Straight Fix)
+    // Corner Fix has priority over Dead-Straight Fix
     if (typeof isCornerSealed === 'function' && isCornerSealed(P.id)) {
       startCornerFixCross(P.id);
-      return; // Corner Fix UI takes over HUD/locks actions
+      return;
     }
 
     // Dead-Straight Fix (only if not already consumed this turn)
@@ -1655,8 +1649,47 @@ function checkForceElbow(P){
   document.getElementById('undoTurnBtn').addEventListener('click', undoTurn);
   document.getElementById('redoTurnBtn').addEventListener('click', redoTurn);
 
+  function renderCornerScoreTable(){
+    const tb = document.querySelector('#cornerScoreTable tbody');
+    if (!tb || !state || !state.players) return;
+
+    const N = state.N;
+
+    // Map pocket -> text with coordinates based on current board size
+    const quadText = (pocket) => {
+      switch (pocket) {
+        case 'NW': return 'NW (0,0)';
+        case 'NE': return `NE (${N-1},0)`;
+        case 'SE': return `SE (${N-1},${N-1})`;
+        case 'SW': return `SW (0,${N-1})`;
+        default:   return pocket || '—';
+      }
+    };
+
+    for (const p of state.players) {
+      const pid = p.id;
+      // reached is stored as Set of player names (e.g., 'Red', 'Green')
+      const reachedSet = p.reached
+        ? (Array.isArray(p.reached) ? new Set(p.reached) : p.reached)
+        : new Set();
+
+      // Show same bracket letters as the top Score tag: [R, G, ...]
+      const letters = reachedSet.size
+        ? Array.from(reachedSet).map(n => String(n)[0]).join(', ')
+        : '';
+
+      const scoreStr = `${reachedSet.size}/3${letters ? ` [${letters}]` : ''}`;
+
+      const qEl = document.getElementById(`quad-${pid}`);
+      const sEl = document.getElementById(`score-${pid}`);
+      if (qEl) qEl.textContent = quadText(p.pocket);
+      if (sEl) sEl.textContent = scoreStr;
+    }
+  }
 
   function updateHUD(){
+    renderCornerScoreTable();
+
     const P=currentPlayer();
 
     if (state.phase === 'deadFix'){
