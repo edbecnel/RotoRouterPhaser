@@ -2,7 +2,7 @@
 
 +**Build:** 2025-09-27
 
-- This build includes **Save/Load**, the **Board Fully Tracked** lock, the **Dead-Straight Fix** rule, the **Undo/Redo system**, a unified history fix-phase handler, and the new **SVG Gear Mesh** enhancement (with animated rotations synced to track rotations).
+- This build includes **Save/Load**, the **Board Fully Tracked** lock, the **Dead-Straight Fix** rule, the **Undo/Redo system**, a unified history fix-phase handler, and the new **SVG Gear Mesh** enhancement (with animated rotations synced to track rotations). It also adds updated **token movement rules**, a **no-legal-placement bottom** path (no penalty), and **player elimination / turn skip** once a player is out of tokens.
 
   ***
 
@@ -112,6 +112,32 @@ The sidebar now includes a dedicated **Corners Score Table**:
 
 ---
 
+---
+
+### 7) Token movement rules (blocking + corner exception)
+
+- Tokens **cannot pass through any other tokens** by default.
+- If a player’s token would otherwise be **trapped by opponents’ tokens**, movement may **pass through opponent tokens** (never through your own) solely to find legal destinations. You still **cannot end** on an occupied non-corner cell.
+- **Corners can’t be blocked:** you may **move onto an opponent’s corner** even if their token already occupies that corner; that move **scores** and resolves per normal rules.
+
+---
+
+### 8) No-legal-placement → Bottom without penalty (and no forced draw deadlock)
+
+- When the drawn **track card** has **zero legal placements** anywhere on the board:
+  - **Bottom**ing that card moves it to the bottom of the deck **without** incrementing **Skipped** or **Elbows Skipped**.
+  - **Draw is not locked**; you may draw again immediately in the same turn.
+  - The “Forced Draw/Place” rule is **waived** in this case to avoid deadlocks.
+- Normal Bottom behavior (with skip counters and draw lock) still applies when a legal placement exists.
+
+---
+
+### 9) Player elimination & turn skip (out of tokens)
+
+- Each player has a lifetime total of **3 tokens**.
+- When a player has **no tokens on the board** and has **removed all 3** (e.g., via scoring), they are **out** and their turns are **automatically skipped** thereafter.
+- The HUD’s “Token: X/3” now shows **tokens remaining to place** (`3 - (removed + on-board)`).
+
 ## Developer Notes
 
 ### Undo/Redo config
@@ -167,6 +193,34 @@ Each history snapshot carries a `__turnId` so global operations can stay in sync
 - Each cell now carries a persistent `gearOffset` (degrees) so visual gear orientations match track rotations.
 - `snapshotState()` includes `gearOffset`, and `applySnapshot()` restores it.
 - This ensures **Undo/Redo** and **Save/Load** both correctly restore gear orientations, eliminating drift or snap-back.
+
+### Token pathfinding (strict + fallback)
+
+- `reachableFrom()` runs in **two phases**:
+  1. **Strict:** treats **any token** as a blocker (no pass-through).
+  2. **Fallback (only if trapped):** allows pass-through over **opponent tokens** (never your own) to find destinations. You still can’t end on an occupied non-corner cell.
+- **Corner exception**: If a neighbor is an opponent’s **own corner** and their token is on it, it remains a **legal terminal** (corners can’t be blocked) but we **don’t traverse beyond** it.
+
+### No-legal-placement bottoming (no penalty)
+
+- `canPlaceDrawnNow()` checks if the current drawn track has any legal placements.
+- If **none**, `bottomCard()`:
+  - Moves the card to the bottom of the deck,
+  - **Does not** increment `skipCount` or `elbowSkipCount`,
+  - **Does not** lock draw and clears `drawUsed` so the player may draw again.
+- `checkForcePlace()` waives the forced-draw rule while holding an **unplaceable** card to prevent deadlocks.
+
+### Player elimination / skipping turns
+
+- Each player tracks `tokensRemoved` (lifetime removed tokens).
+- At `startTurn()`, if `tokensRemoved >= 3` **and** `countTokens(pid) === 0`, that player is **skipped** automatically.
+- The HUD “Token: X/3” displays remaining supply (`3 - (removed + on-board)`).
+
+### Legacy save backfill (pre-`tokensRemoved`)
+
+- Old saves won’t contain `tokensRemoved`. On `applySnapshot()`:
+  - We infer a sensible value using the player’s `reached` set and current on-board token count.
+  - If **no tokens are on board** and no other info is available, we conservatively assume the player has exhausted supply so the **skip-out** logic works after load.
 
 ---
 
