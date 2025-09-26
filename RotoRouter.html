@@ -187,6 +187,26 @@
     { id:2, name:'Blue', color: COLORS.tokenB, pocket:'SE' },
     { id:3, name:'Yellow', color: COLORS.tokenY, pocket:'SW' },
   ];
+
+  // ==== GEAR SVG (mesh-ready: alternate 0° / 90°) ====
+  const GEAR_SRC = 'gear-grayblue.svg';     // file should sit beside RotoRouter.html
+  const gearImg = new Image();
+  let gearReady = false;
+  // Optional: set decoding to sync to improve first-paint, browsers may ignore
+  if ('decoding' in gearImg) gearImg.decoding = 'sync';
+  gearImg.onload = () => { gearReady = true; render(); };
+  gearImg.onerror = () => { console.warn('Could not load gear SVG:', GEAR_SRC); };
+  gearImg.src = GEAR_SRC;
+  // How tightly the gear outer diameter should fit the cell (1.00 = full cell)
+  // For tight teeth meshing, keep at 1.00. If you want a tiny gap, try 0.98.
+  const GEAR_OUTER_FIT = 1.00;   // -> try 0.98 if you prefer a hairline gap
+  // ==== GEAR SPIN (animated) ====
+  // Toggle overall gear animation
+  const GEAR_SPIN_ENABLED = true;
+
+  // Spin speed in revolutions per minute (positive = clockwise for even parity cells)
+  const GEAR_SPIN_RPM = 6;   // try 3–12 to taste
+
   // ==== UNDO / REDO CONFIG ====
   // Master switch and per-scope toggles (code-only; no UI)
   const UNDO_CONFIG = {
@@ -235,6 +255,9 @@
     };
   }
   function makeBoard(N){ const b=[]; for(let y=0;y<N;y++){ const r=[]; for(let x=0;x<N;x++){ r.push({track:null,rot:0,owner:null,token:null}); } b.push(r);} return b; }
+  function initGearOffsets(N){
+    state.gearOffset = Array.from({length:N}, () => Array(N).fill(0));
+  }
 
   const UI = {
     boardSize:()=>document.getElementById('boardSize'),
@@ -252,6 +275,8 @@
     rotAnims: [],  // active rotation tweens (on placed tiles)
     ghostRotAnim: null,   // {from,to,t0,dur} while rotating the ghost
     _animating: false,     // RAF loop guard
+    gearSpinAnim: null,   // { base: +90|-90|180, t0, dur } active only during Apply tween
+    gearOffset: null,     // per-cell persistent gear angle offset (degrees, 0..359)
     // Undo/Redo stacks
     history: [],        // Global undo stack (array of snapshots)
     redo:    [],        // Global redo stack
@@ -469,6 +494,11 @@
       board.push(row);
     }
 
+    // Deep copy per-cell gear offsets so Undo/Redo can restore visual orientation
+    const gearOffset = (state.gearOffset && state.gearOffset.length === state.N)
+      ? state.gearOffset.map(row => row.slice())
+      : null;    
+
     return {
       __rr_version: 1,
       savedAt: new Date().toISOString(),
@@ -476,6 +506,7 @@
       current: state.current|0,
       players,
       board,
+      gearOffset,  // ← include in snapshot (also helps Save/Load stay visually consistent)
       // Corner/seal bookkeeping
       cornerLockTurns: Array.isArray(state.cornerLockTurns) ? [...state.cornerLockTurns] : null,
       cornerSealed: Array.isArray(state.cornerSealed) ? [...state.cornerSealed] : null,
@@ -529,6 +560,7 @@
 
     // Restore board
     state.board = makeBoard(state.N);
+    initGearOffsets(state.N); // <- add this
     for (let y=0; y<state.N; y++) {
       for (let x=0; x<state.N; x++) {
         const s = (snap.board[y] && snap.board[y][x]) || {};
@@ -540,6 +572,16 @@
         };
       }
     }
+
+    // Restore per-cell gear angles if present in the snapshot (Undo/Redo & Save/Load)
+    if (Array.isArray(snap.gearOffset)) {
+      state.gearOffset = Array.from({length: state.N}, (_, y) =>
+        Array.from({length: state.N}, (_, x) => {
+          const v = (snap.gearOffset[y] && snap.gearOffset[y][x]);
+          return Number.isFinite(v) ? ((((v % 360) + 360) % 360)|0) : 0;
+        })
+      );
+    } // else keep the zero-initialized offsets from initGearOffsets(N)    
 
     // Restore players (keep order aligned with PLAYERS by id)
     state.players = PLAYERS.map((baseP) => {
@@ -826,6 +868,7 @@ function cornerFor(pid){
   function newGame(){
     state.N = parseInt(UI.boardSize().value,10);
     state.board = makeBoard(state.N);
+    initGearOffsets(state.N); // <- add this
     state.players = PLAYERS.map(p=>({...p, deck:makeDeck(state.N), drawn:null, tokens:0, drawLocked:false, drawUsed:false, tokenUsed:false, rollUsed:false, skipCount: 0, elbowSkipCount: 0, forceElbow: false }));
     state.cornerLockTurns = PLAYERS.map(() => 0);
     state.cornerSealed    = PLAYERS.map(() => false);
@@ -1277,7 +1320,7 @@ function checkForceElbow(P){
 
   // Drive frames while any animation is active (tile tweens or ghost tween)
   function hasActiveAnim(){
-    return (state.rotAnims && state.rotAnims.length>0) || !!state.ghostRotAnim;
+     return (state.rotAnims && state.rotAnims.length>0) || !!state.ghostRotAnim || !!state.gearSpinAnim;
   }
   function ensureAnimLoop(){
     if (state._animating) return;
@@ -1305,22 +1348,38 @@ function checkForceElbow(P){
     return mod360(ang);
   }
 
+  function startGearSpinPulse(baseDeg, dur){
+    // baseDeg is the die’s base rotation: +90 (CW90), -90 (CCW90), or +180 (DEG180)
+    state.gearSpinAnim = { base: baseDeg, t0: performance.now(), dur };
+    ensureAnimLoop(); // reuse the existing RAF driver
+  }
+
   function applyRotation(){
     if(!state.die || state.die==='X') return;
     pushHistory('Apply Rotation');
     const base = thetaFor(state.die);
+    const APPLY_DUR = 650;                // keep in one place so tiles & gears match
+    startGearSpinPulse(base, APPLY_DUR);  // spin gears only during this Apply tween
+
     let rotated=0;
     for(let y=0;y<state.N;y++){
       for(let x=0;x<state.N;x++){
-        const cell=state.board[y][x];
-        if(!cell.track || cell.track==='Block') continue;
-        const sign = ((x + y) % 2 === 0) ? 1 : -1;
-        // Tween from current to confirmed preview orientation (0° included)
-        const fromRot = cell.rot;
-        const toRot   = mod360(cell.rot + sign*base);
-        startRotateAnim(x,y, fromRot, toRot, 650);
-        cell.rot = toRot; // commit; tween overlays visually        
-        rotated++;
+      const cell = state.board[y][x];
+      const sign = ((x + y) % 2 === 0) ? 1 : -1;
+
+      // 1) Commit the new gear offset for EVERY cell (track or not).
+      if (state.gearOffset && state.gearOffset[y]) {
+        const pending = sign * base; // same parity as tiles
+        state.gearOffset[y][x] = mod360((state.gearOffset[y][x] || 0) + pending);
+      }
+
+      // 2) Only rotate/tween tiles that actually have tracks.
+      if(!cell.track || cell.track==='Block') continue;
+      const fromRot = cell.rot;
+      const toRot   = mod360(cell.rot + sign*base);
+      startRotateAnim(x,y, fromRot, toRot, APPLY_DUR);
+      cell.rot = toRot; // commit; tween overlays visually
+      rotated++;
       }
     }
 
@@ -1687,6 +1746,33 @@ function checkForceElbow(P){
     }
   }
 
+    // Start/stop a requestAnimationFrame loop that advances the global gear angle
+  function startGearSpin(){
+    if (!GEAR_SPIN_ENABLED) return;
+    if (state._spinRAF) cancelAnimationFrame(state._spinRAF);
+    state._lastSpinT = performance.now();
+
+    const step = (t) => {
+      const dt = t - state._lastSpinT;                // milliseconds
+      state._lastSpinT = t;
+
+      // degrees per millisecond = RPM * 360 / 60000
+      const degPerMs = (GEAR_SPIN_RPM * 360) / 60000;
+      state.gearSpinDeg = (state.gearSpinDeg + degPerMs * dt) % 360;
+
+      // Repaint only if the image is ready (avoids useless work before onload)
+      if (gearReady) render();
+
+      state._spinRAF = requestAnimationFrame(step);
+    };
+    state._spinRAF = requestAnimationFrame(step);
+  }
+
+  function stopGearSpin(){
+    if (state._spinRAF) cancelAnimationFrame(state._spinRAF);
+    state._spinRAF = null;
+  }
+
   function updateHUD(){
     renderCornerScoreTable();
 
@@ -1862,6 +1948,8 @@ function checkForceElbow(P){
     ctx.fillStyle=COLORS.bg; ctx.fillRect(0,0,canvas.width,canvas.height);
     ctx.save(); ctx.translate(pad,pad);
     const size=cell*N;
+    const now = performance.now();
+    state._frameNow = now;  // unify timing across all per-frame animations
     // grid
     ctx.strokeStyle=COLORS.grid; ctx.lineWidth=1;
     ctx.strokeRect(0,0,size,size);
@@ -1872,7 +1960,6 @@ function checkForceElbow(P){
     drawCornerBadges();
 
     // tracks (with rotation tween overlay)
-    const now = performance.now();
     // prune finished tweens
     state.rotAnims = state.rotAnims.filter(a => (now - a.t0) <= (a.dur + 24));
     const rotMap = new Map();
@@ -1961,6 +2048,13 @@ function checkForceElbow(P){
         ctx.restore();
       }
     }
+    // --- end-of-frame cleanup for gear tween ---
+    if (state.gearSpinAnim) {
+      const a = state.gearSpinAnim;
+      if ((performance.now() - a.t0) >= a.dur) {
+        state.gearSpinAnim = null;
+      }
+    }
     // Outer restore for the whole frame   
     ctx.restore();
   }
@@ -2046,14 +2140,72 @@ function checkForceElbow(P){
     ctx.restore();
   }
 
-  function drawGear(x,y){
-    const cell=state.cell;
-    const cx=x*cell+cell/2, cy=y*cell+cell/2;
-    ctx.strokeStyle=COLORS.grid; ctx.lineWidth=1; ctx.strokeRect(x*cell, y*cell, cell, cell);
-    ctx.strokeStyle=COLORS.grid; ctx.lineWidth=2;
-    ctx.beginPath(); ctx.arc(cx, cy, cell/2-4, 0, Math.PI*2); ctx.stroke();
-    ctx.fillStyle='#202a3d';
-    ctx.beginPath(); ctx.arc(cx, cy, cell/2-7, 0, Math.PI*2); ctx.fill();
+  // function drawGear(x,y){
+  //   const cell=state.cell;
+  //   const cx=x*cell+cell/2, cy=y*cell+cell/2;
+  //   ctx.strokeStyle=COLORS.grid; ctx.lineWidth=1; ctx.strokeRect(x*cell, y*cell, cell, cell);
+  //   ctx.strokeStyle=COLORS.grid; ctx.lineWidth=2;
+  //   ctx.beginPath(); ctx.arc(cx, cy, cell/2-4, 0, Math.PI*2); ctx.stroke();
+  //   ctx.fillStyle='#202a3d';
+  //   ctx.beginPath(); ctx.arc(cx, cy, cell/2-7, 0, Math.PI*2); ctx.fill();
+  // }
+
+  // Draw a background gear from the external SVG.
+  // Alternates orientation by cell parity: even -> 0°, odd -> 90°.
+  function drawGear(x, y){
+    const cell = state.cell;
+    const cx   = x*cell + cell/2;
+    const cy   = y*cell + cell/2;
+
+    // Draw a faint cell border (keeps your existing grid vibe)
+    ctx.strokeStyle = COLORS.grid;
+    ctx.lineWidth   = 1;
+    ctx.strokeRect(x*cell, y*cell, cell, cell);
+
+    // If the SVG isn’t ready, keep the old fallback so nothing looks broken
+    if (!gearReady || !gearImg.naturalWidth || !gearImg.naturalHeight){
+      ctx.strokeStyle = COLORS.grid; ctx.lineWidth = 2;
+      ctx.beginPath(); ctx.arc(cx, cy, cell/2-4, 0, Math.PI*2); ctx.stroke();
+      ctx.fillStyle = '#202a3d';
+      ctx.beginPath(); ctx.arc(cx, cy, cell/2-7, 0, Math.PI*2); ctx.fill();
+      return;
+    }
+
+    // Target outer diameter (so neighboring centers = outer diameter => visual meshing)
+    const targetOuter = cell * GEAR_OUTER_FIT;
+
+    // Scale uniformly based on the smaller natural dimension of the SVG
+    const natW = gearImg.naturalWidth;
+    const natH = gearImg.naturalHeight;
+    const natMin = Math.min(natW, natH);
+    const k = targetOuter / natMin;
+
+    // Base mesh orientation (0°/90°) + persistent per-cell offset + transient tween to it
+    const baseDeg = ((x + y) % 2 === 0) ? 0 : 90;
+    const offset  = (state.gearOffset && state.gearOffset[y] && state.gearOffset[y][x]) || 0;
+
+    let animAdj = 0; // delta applied on top of the committed offset (old→new interpolation)
+    const a = state.gearSpinAnim;
+    if (a) {
+      const now = state._frameNow || performance.now();
+      const u   = Math.min(1, (now - a.t0) / a.dur);
+      const k   = easeInOutQuad(u);            // same easing as tile tween
+      const pending = ((x + y) % 2 === 0) ? (+a.base) : (-a.base); // signed per-cell delta
+      // Show: newOffset - pending*(1-k)  →  starts at old, lands at new without snapping
+      animAdj = -pending * (1 - k);
+    }
+    const rotDeg = baseDeg + offset + animAdj;
+
+    ctx.save();
+    ctx.translate(cx, cy);
+    ctx.rotate(rotDeg * Math.PI / 180);
+    ctx.globalAlpha = 1.0; // feel free to drop to ~0.9 if you want tracks to pop more
+
+    // Render with uniform scale; keep the original aspect ratio
+    const drawW = natW * k;
+    const drawH = natH * k;
+    ctx.drawImage(gearImg, -drawW/2, -drawH/2, drawW, drawH);
+    ctx.restore();
   }
 
   function drawTrack(type, rot, x,y, alpha){

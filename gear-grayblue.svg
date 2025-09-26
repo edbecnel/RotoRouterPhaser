@@ -1,0 +1,113 @@
+<?xml version="1.0" encoding="UTF-8" standalone="no"?>
+<!-- Created with Inkscape (http://www.inkscape.org/) and export_objects.py -->
+
+<svg
+   version="1.1"
+   id="svg1"
+   width="15.926156"
+   height="15.576549"
+   viewBox="0 0 15.926156 15.576549"
+   sodipodi:docname="gear-grayblue.svg"
+   inkscape:version="1.4 (86a8ad7, 2024-10-11)"
+   xmlns:inkscape="http://www.inkscape.org/namespaces/inkscape"
+   xmlns:sodipodi="http://sodipodi.sourceforge.net/DTD/sodipodi-0.dtd"
+   xmlns="http://www.w3.org/2000/svg"
+   xmlns:svg="http://www.w3.org/2000/svg"
+   xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#"
+   xmlns:cc="http://creativecommons.org/ns#"
+   xmlns:dc="http://purl.org/dc/elements/1.1/">
+  <sodipodi:namedview
+     id="namedview1"
+     pagecolor="#000000"
+     bordercolor="#000000"
+     borderopacity="0.25"
+     inkscape:showpageshadow="2"
+     inkscape:pageopacity="0.0"
+     inkscape:pagecheckerboard="true"
+     inkscape:deskcolor="#d1d1d1"
+     inkscape:zoom="51.8125"
+     inkscape:cx="7.9227986"
+     inkscape:cy="7.8069964"
+     inkscape:window-width="1920"
+     inkscape:window-height="1009"
+     inkscape:window-x="1912"
+     inkscape:window-y="776"
+     inkscape:window-maximized="1"
+     inkscape:current-layer="layercompo"
+     showborder="true" />
+  <defs
+     id="defs139" />
+  <metadata
+     id="metadata1906">
+    <rdf:RDF>
+      <cc:Work
+         rdf:about="">
+        <dc:format>image/svg+xml</dc:format>
+        <dc:type
+           rdf:resource="http://purl.org/dc/dcmitype/StillImage" />
+        <cc:license
+           rdf:resource="http://creativecommons.org/publicdomain/zero/1.0/" />
+        <dc:date>13 Jan 2019</dc:date>
+        <dc:creator>
+          <cc:Agent>
+            <dc:title>Ramón Miranda</dc:title>
+          </cc:Agent>
+        </dc:creator>
+        <dc:rights>
+          <cc:Agent>
+            <dc:title>see the license tab</dc:title>
+          </cc:Agent>
+        </dc:rights>
+        <dc:subject>
+          <rdf:Bag>
+            <rdf:li>icon ui</rdf:li>
+          </rdf:Bag>
+        </dc:subject>
+        <dc:description>This is a contribution with Inkscape Project from
+Ramon Miranda www.ramonmiranda.com (design and SVG file)
+Jabiertxo (SVG stuff to integrate them in UI)</dc:description>
+        <dc:publisher>
+          <cc:Agent>
+            <dc:title />
+          </cc:Agent>
+        </dc:publisher>
+        <dc:identifier />
+        <dc:source />
+        <dc:relation />
+        <dc:language>-</dc:language>
+        <dc:coverage />
+        <dc:contributor>
+          <cc:Agent>
+            <dc:title>Ramon Miranda
+Jabier Arraiza</dc:title>
+          </cc:Agent>
+        </dc:contributor>
+      </cc:Work>
+      <cc:License
+         rdf:about="http://creativecommons.org/publicdomain/zero/1.0/">
+        <cc:permits
+           rdf:resource="http://creativecommons.org/ns#Reproduction" />
+        <cc:permits
+           rdf:resource="http://creativecommons.org/ns#Distribution" />
+        <cc:permits
+           rdf:resource="http://creativecommons.org/ns#DerivativeWorks" />
+      </cc:License>
+    </rdf:RDF>
+  </metadata>
+  <g
+     id="layercompo"
+     transform="translate(0.00518363,-0.2118143)">
+    <ellipse
+       style="fill:#324261;fill-opacity:1;stroke:none;stroke-width:2.64981"
+       id="path1"
+       cx="7.8841977"
+       cy="8.0965023"
+       rx="3.6381183"
+       ry="3.3486128"
+       transform="translate(-0.07720145,0.01930036)" />
+    <path
+       id="path420"
+       style="display:inline;opacity:1;fill:#324261;fill-opacity:1;stroke-width:1.12698"
+       d="M 11.113753,0.84030991 C 10.886659,0.74355521 10.649595,0.65398345 10.410323,0.57545688 10.170276,0.49874806 9.92763,0.43265442 9.6865346,0.37821904 L 8.5055498,2.4672103 c -0.389717,-0.039543 -0.7828265,-0.04606 -1.1635772,-0.008 L 6.1943467,0.3548036 C 5.6904084,0.46334836 5.2219593,0.64750856 4.7516785,0.84753981 L 5.0651229,3.1983788 C 4.7353238,3.3855502 4.4189561,3.6058088 4.1322619,3.8553273 L 1.954127,2.8188075 C 1.6165278,3.1920101 1.3230057,3.6020188 1.0599791,4.0419451 l 1.6535874,1.714532 C 2.6348767,5.9293427 2.5638006,6.0945229 2.5019913,6.2781252 l 0.012796,0.0041 c -0.047328,0.155207 -0.086734,0.3058477 -0.121506,0.4639959 L 0.0341097,7.1636695 C -0.01668273,7.6722699 -0.02518778,8.1736502 0.02396836,8.6719793 l 2.37785684,0.437465 c 0.082107,0.3688018 0.2050434,0.7310334 0.3591849,1.0747527 l -1.6589119,1.713477 c 0.2597811,0.436217 0.5279733,0.858336 0.8695936,1.240394 L 4.1555253,12.110752 C 4.4399458,12.36385 4.761016,12.589605 5.09903,12.785408 l -0.2959467,2.374587 c 0.22703,0.09683 0.4612925,0.187351 0.7013767,0.263977 l 0.00106,4.39e-4 c 0.2397417,0.07735 0.4837362,0.143258 0.7248013,0.197697 l 1.1799579,-2.089409 c 0.3897238,0.03951 0.7828364,0.04598 1.1635729,0.008 l 1.1486552,2.104833 c 0.5039646,-0.108547 0.9723776,-0.29268 1.4426766,-0.492743 l -0.313446,-2.35084 c 0.329796,-0.187175 0.645117,-0.407868 0.931832,-0.657378 l 2.179161,1.036944 c 0.33758,-0.373217 0.630102,-0.783623 0.893122,-1.223576 l -1.652558,-1.714125 c 0.07868,-0.17285 0.150728,-0.337697 0.210578,-0.5220622 l -0.01181,-0.00368 c 0.04684,-0.1553736 0.08652,-0.305927 0.121499,-0.4640075 l 2.358165,-0.4178727 c 0.05095,-0.5085337 0.0593,-1.0099948 0.01014,-1.5083085 L 13.515032,6.8908404 C 13.432928,6.5220415 13.309394,6.1583731 13.155247,5.8146523 L 14.813705,4.1021964 C 14.553945,3.6659807 14.285763,3.243892 13.944132,2.8618033 l -2.183833,1.027316 C 11.475941,3.6358273 11.154825,3.4102816 10.816787,3.2144775 Z M 9.1101061,5.4472833 c 1.3382539,0.5853762 2.0397589,2.0798153 1.5790519,3.472219 l 0.0018,7.659e-4 C 10.173741,10.363213 8.575549,11.140558 7.0825264,10.657593 5.5668978,10.167312 4.7367297,8.5652238 5.2281271,7.0800076 l -0.00267,-0.00111 C 5.7429919,5.6364884 7.3416596,4.8598894 8.8343787,5.3427574 c 0.094724,0.03064 0.1864993,0.065481 0.2757051,0.10453 z" />
+  </g>
+</svg>

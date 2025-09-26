@@ -1,10 +1,10 @@
 # RotoRouter — No-Block Edition
 
-**Build:** 2025-09-26
++**Build:** 2025-09-27
 
-This build includes **Save/Load**, the **Board Fully Tracked** lock, the **Dead-Straight Fix** rule, and the **Undo/Redo system**. It also **unifies history fix‑phase handling** so that **Undo** and **Redo** both re-enter Corner Fix (if sealed) or Dead‑Straight Fix (if available) consistently.
+- This build includes **Save/Load**, the **Board Fully Tracked** lock, the **Dead-Straight Fix** rule, the **Undo/Redo system**, a unified history fix-phase handler, and the new **SVG Gear Mesh** enhancement (with animated rotations synced to track rotations).
 
----
+  ***
 
 ## New features
 
@@ -93,6 +93,25 @@ The sidebar now includes a dedicated **Corners Score Table**:
 - Automatically updates after every token scoring event or Undo/Redo.
 - Replaces the earlier legend/separator layout, consolidating all corner/score info into a single clear table.
 
+---
+
+### 6) SVG Gear Mesh (with animated rotation)
+
+- Each cell of the board now renders a **gear image** (`gear-grayblue.svg`) behind tracks/tokens.
+- Neighboring gears alternate **0° / 90° base orientation** so the teeth appear to mesh visually.
+- On **Apply Rotation** (CW90, CCW90, or 180°):
+  - Gears animate at the **same duration/easing** as track rotation tweens.
+  - Each gear maintains a **persistent offset** so Undo/Redo and Save/Load restore orientations correctly.
+- Gears do **not** spin on RS/RE actions, only on Apply die rolls.
+- A fallback vector gear still draws if the SVG fails to load.
+
+**Assets**
+
+- Place `gear-grayblue.svg` in the same folder as `RotoRouter.html`.
+- Adjust `GEAR_OUTER_FIT` in code (default `1.00`) to tweak visual spacing between meshed gears.
+
+---
+
 ## Developer Notes
 
 ### Undo/Redo config
@@ -142,6 +161,12 @@ Each history snapshot carries a `__turnId` so global operations can stay in sync
 - `snapshotState()` excludes undo/redo stacks.
 - Save/Load **clears** history stacks and starts fresh.
 - Undo/Redo calls pass `{ fromHistory:true }` so stacks aren’t cleared and fix subphases are restored properly.
+
+### Gear offset persistence
+
+- Each cell now carries a persistent `gearOffset` (degrees) so visual gear orientations match track rotations.
+- `snapshotState()` includes `gearOffset`, and `applySnapshot()` restores it.
+- This ensures **Undo/Redo** and **Save/Load** both correctly restore gear orientations, eliminating drift or snap-back.
 
 ---
 
