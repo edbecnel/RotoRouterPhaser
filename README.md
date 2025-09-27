@@ -2,9 +2,9 @@
 
 +**Build:** 2025-09-27
 
-- This build includes **Save/Load**, the **Board Fully Tracked** lock, the **Dead-Straight Fix** rule, the **Undo/Redo system**, a unified history fix-phase handler, and the new **SVG Gear Mesh** enhancement (with animated rotations synced to track rotations). It also adds updated **token movement rules**, a **no-legal-placement bottom** path (no penalty), and **player elimination / turn skip** once a player is out of tokens.
++This build includes **Save/Load**, the **Board Fully Tracked** lock, the **Dead-Straight Fix** rule, the **Undo/Redo system**, a unified history fix-phase handler, and the new **SVG Gear Mesh** enhancement (with animated rotations synced to track rotations). It also adds updated **token movement rules**, a **no-legal-placement bottom** path (no penalty, but only once per turn), and **player elimination / turn skip** once a player is out of tokens.
 
-  ***
+---
 
 ## New features
 
@@ -126,9 +126,12 @@ The sidebar now includes a dedicated **Corners Score Table**:
 
 - When the drawn **track card** has **zero legal placements** anywhere on the board:
   - **Bottom**ing that card moves it to the bottom of the deck **without** incrementing **Skipped** or **Elbows Skipped**.
-  - **Draw is not locked**; you may draw again immediately in the same turn.
+  - **Draw is marked as Used** for that turn (so you cannot chain multiple Draw→Bottoms).
   - The “Forced Draw/Place” rule is **waived** in this case to avoid deadlocks.
 - Normal Bottom behavior (with skip counters and draw lock) still applies when a legal placement exists.
+
+**Summary:** You may either **keep** an unplaceable card until next turn or **Bottom** it once per turn without penalty.  
+If you Bottom it, your Draw state is set to **Used** — you must wait for your next turn to draw again.
 
 ---
 
@@ -207,7 +210,8 @@ Each history snapshot carries a `__turnId` so global operations can stay in sync
 - If **none**, `bottomCard()`:
   - Moves the card to the bottom of the deck,
   - **Does not** increment `skipCount` or `elbowSkipCount`,
-  - **Does not** lock draw and clears `drawUsed` so the player may draw again.
+  - Marks `drawUsed = true` so the player cannot draw again until their next turn.
+- This ensures **only one Bottom per turn** is possible.
 - `checkForcePlace()` waives the forced-draw rule while holding an **unplaceable** card to prevent deadlocks.
 
 ### Player elimination / skipping turns

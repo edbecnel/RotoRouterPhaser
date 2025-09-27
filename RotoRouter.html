@@ -830,7 +830,7 @@ function cornerFor(pid){
     const was = !!state.boardSaturated;
     state.boardSaturated = isBoardFullyTracked();
     if (!was && state.boardSaturated){
-      setStatus('Board is full of tracks — drawing/placing tracks is now disabled. Tokens and rotations still allowed.');
+      setStatus('Board is full of tracks — normal placement locked. Tokens, rotations, and rotate/replace cards (RS/RE/RC) still allowed.');
       toast('Board fully tracked: track placement locked.');
     }
   }
@@ -1025,7 +1025,15 @@ function cornerFor(pid){
   function drawCard(){
     pushHistory('Draw');
 
-    if (state.boardSaturated){ setStatus('Board is full of tracks — drawing is disabled.'); toast('Draw disabled (board full)'); return; }
+    if (state.boardSaturated){
+      const P = currentPlayer();
+      if (!hasRotationInDeck(P)) {
+        setStatus('Board is full of tracks — drawing is locked (no RS/RE/RC left in deck).');
+        toast('Draw locked (board full; no rotations left)');
+        return;
+      }
+      // else: rotations remain → drawing is allowed
+    }
     const P=currentPlayer();
     if(P.drawLocked && !state.forcePlace){ setStatus('You bottomed this turn; drawing is locked until End Turn.'); return; }
     if(P.drawUsed   && !state.forcePlace){ setStatus('You have already drawn this turn. End Turn to draw again next turn.'); return; }
@@ -1291,6 +1299,17 @@ function isTrackCard(card){
           TrackCard.RStraight, TrackCard.RElbow, TrackCard.RCross].includes(card);
 }
 
+function isRotationCard(card){
+  return card===TrackCard.RStraight || card===TrackCard.RElbow || card===TrackCard.RCross;
+}
+
+function hasRotationInDeck(P){
+  const draw = (P.deck && Array.isArray(P.deck.draw)) ? P.deck.draw : [];
+  const disc = (P.deck && Array.isArray(P.deck.discard)) ? P.deck.discard : [];
+  const all  = draw.concat(disc);
+  return all.some(c => c===TrackCard.RStraight || c===TrackCard.RElbow || c===TrackCard.RCross);
+}
+
 function checkForcePlace(){
   // === FORCE-DRAW RULE (anchor: RR_FORCE_DRAW) ===
   const P = currentPlayer();
@@ -1316,8 +1335,12 @@ function checkForceElbow(P){
 }
 
   function placeMode(){
-    if (state.boardSaturated){ setStatus('Board is full of tracks — placement disabled.'); toast('Place disabled (board full)'); return; }
     const P=currentPlayer();
+    if (state.boardSaturated && !isRotationCard(P.drawn)){
+      setStatus('Board is full of tracks — only RS/RE/RC can be placed (rotate/replace).');
+      toast('Place disabled (board full; use RS/RE/RC)');
+      return;
+    }    
     if(!P.drawn){ setStatus('Draw a card first.'); return; }
     state.phase='place'; state.subphase=null; computePlaceHighlights(); updateHUD();
     if (!state.highlight || state.highlight.length === 0){
@@ -1329,10 +1352,10 @@ function checkForceElbow(P){
   }
 
  function bottomCard(){
-    if (state.boardSaturated){ setStatus('Board is full of tracks — bottoming is disabled.'); toast('Bottom disabled (board full)'); return; }
-    const P=currentPlayer();
-    if(!P.drawn){ setStatus('Nothing to bottom.'); return; }
+  const P=currentPlayer();
+   if(!P.drawn){ setStatus('Nothing to bottom.'); return; }
    // Check if this card has *no* legal placement anywhere on the board.
+   // On a full board, normal tracks have no legal placements; RS/RE/RC may still be placeable.
    const noPlace = !canPlaceDrawnNow(P.id);
    pushHistory(noPlace ? 'Bottom (No-Place, no penalty)' : 'Bottom');
    const bottomed = P.drawn;                  // capture BEFORE clearing
@@ -1341,10 +1364,10 @@ function checkForceElbow(P){
    if (noPlace){
      // --- NO-PENALTY BOTTOM ---
      // Do NOT lock drawing; do NOT increment any skip counters.
-     P.drawLocked   = false;
-     // If Draw was marked used earlier this turn, allow drawing again (no-penalty cycle).
-     P.drawUsed     = false;
-     setStatus('No legal placement exists for that card — moved to bottom without penalty. You may draw again.');
+     // BUT: this counts as your one draw for the turn (cannot chain Bottoms).
+     P.drawLocked   = false;   // not locked, just "used"
+     P.drawUsed     = true;    // ← mark Draw as Used for this turn
+     setStatus('No legal placement exists for that card — moved to bottom without penalty. Draw is now Used for this turn.');
    } else {
      // --- NORMAL BOTTOM (with penalties) ---
      P.drawLocked = true;
@@ -1892,20 +1915,26 @@ function checkForceElbow(P){
 
     if (state.phase === 'deadFix'){
       // Keep the messaging visible while the selection is up
-      drawTag().textContent = state.boardSaturated
+      drawTag().textContent = (state.phase === 'deadFix')
         ? 'Draw: Locked (Dead-Straight Fix)'
-        : 'Draw: Ready (Dead-Straight Fix)';
-      setStatus('Dead-Straight Fix: replace ONE highlighted Straight with a Cross (free).');
+        : (P.drawUsed
+            ? 'Draw: Used'
+            : (rotationsRemain ? 'Draw: Ready (Board Full: rotations available)'
+                               : 'Draw: Locked (Board Full)'));      setStatus('Dead-Straight Fix: replace ONE highlighted Straight with a Cross (free).');
       render();
       updateUndoButtons();
       return; // ← prevent later HUD paths from overwriting this status
     }
 
     if (state.boardSaturated){
-      // Tags
+      const P = currentPlayer();
+      const rotationsRemain = hasRotationInDeck(P);
+      const holdingRotation = isRotationCard(P.drawn);
+
+      // Tag
       drawTag().textContent = state.phase === 'deadFix'
         ? 'Draw: Locked (Dead-Straight Fix)'
-        : 'Draw: Locked (Board Full)';
+        : (rotationsRemain ? 'Draw: Ready (Board Full: rotations available)' : 'Draw: Locked (Board Full)');
 
       // Basic tags that should still reflect current state
       turnTag().textContent  = 'Turn: ' + currentPlayer().name + ' (' + currentPlayer().pocket + ')';
@@ -1924,10 +1953,13 @@ function checkForceElbow(P){
         el.textContent = 'Score: ' + (reached ? reached.size : 0) + '/3' + (list ? (' ['+list+']') : '');
       })();
 
-      // Buttons
-      btn('drawBtn').disabled   = true;
-      btn('placeBtn').disabled  = true;
-      btn('bottomBtn').disabled = true;
+      // Buttons: draw allowed only if rotations remain; place allowed only if holding RS/RE/RC
+      const forcedOK = state.forcePlace && !P.drawn; // unchanged forced-draw semantics
+      btn('drawBtn').disabled   = !!P.drawn || P.drawUsed || ((!rotationsRemain) && !forcedOK);
+      btn('placeBtn').disabled  = !P.drawn || !holdingRotation;   // only RS/RE/RC can act on full board
+      // Bottom: allowed; if no legal placement (e.g., holding normal track), it will be no-penalty
+      btn('bottomBtn').disabled = !P.drawn || state.forcePlace;
+
       endTurnBtn.disabled = false;
       overrideBtn.style.display = 'none';
       btn('tokenBtn').disabled = !!currentPlayer().tokenUsed;
@@ -1936,8 +1968,7 @@ function checkForceElbow(P){
 
       render();
       updateUndoButtons();
-
-      return; // keep the early-out
+      return;
     }
 
     // Corner Fix HUD lock: show a RED warning and disable all actions until the free Cross is applied
