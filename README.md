@@ -180,6 +180,36 @@ If you Bottom it, your Draw state is set to **Used** — you must wait for your 
 
 - `startTurn()` now **iterates** to the next eligible player (no recursion) and detects **Game Over** when everyone is **finished/out**, preventing call-stack overflows on endgame.
 
+### 17) Main Menu (separate HTML) — setup + live save
+
+- New file: **`MainMenu.html`** (kept separate from the game).
+- Choose **board size**, enter **player names**, and mark players as **AI**.
+- Saves configuration to **`localStorage`** key `rr.setup` on every input change.
+- Click **Start Game** to launch; optional auto-start via `MainMenu.html?go=1`.
+- Start button redirects to `RotoRouter.html?start=1` (small cache-buster).
+
+### 18) Game boot reads setup _inside_ the game (IIFE) and honors 7×7/9×9 immediately
+
+- `RotoRouter.html` now loads `rr.setup` **inside** the main script on `DOMContentLoaded`,
+  assigns it to `state.setup`, syncs the sidebar **Board Size** select, then calls `newGame()`.
+- Ensures **7×7** selection applies immediately without any 9×9 flash.
+
+### 19) In-game **Main Menu** button (same row as “New Game”)
+
+- Added **Main Menu** button next to **New Game** in the **Setup** panel.
+- On click: confirmation → navigates to `MainMenu.html`.
+
+### 20) Immediate canvas rescale when board size changes
+
+- After `newGame()` builds a new board, we force an immediate **resize** with a
+  double `requestAnimationFrame()` to settle layout before measuring/scale.
+- Covers switching **9×9 ↔ 7×7** and menu-launched games.
+
+### 21) Setup helpers
+
+- `loadSetupFromStorage()` reads/normalizes `rr.setup` (board size + players/AI).
+- Sidebar **Board Size** dropdown is kept visually in sync with `state.setup.boardSize`.
+
 ## Developer Notes
 
 ### Undo/Redo config

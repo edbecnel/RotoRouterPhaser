@@ -51,8 +51,10 @@
           </select>
         </label>
       </div>
-      <div class="row"><button class="btn" id="newGameBtn">New Game</button></div>
-
+      <div class="row">
+        <button class="btn" id="newGameBtn">New Game</button>
+        <button class="btn" id="returnMenuBtn">Main Menu</button>
+      </div>
       <h2>Actions</h2>
       <div class="panel">
         <div class="row"><b>Track</b></div>
@@ -155,7 +157,24 @@
   <div id="toast" class="toast"></div>
 
 <script>
-(function(){
+
+function loadSetupFromStorage(){
+  try {
+    const s = JSON.parse(localStorage.getItem('rr.setup') || 'null');
+    if (!s) return null;
+    // normalize expected shape
+    return {
+      boardSize: (Number.isFinite(s.boardSize) ? s.boardSize : 9),
+      players: Array.isArray(s.players) ? s.players.map((p,i)=>({
+        id: i,
+        name: (p && p.name) ? String(p.name) : ['Red','Green','Blue','Yellow'][i],
+        ai: !!(p && p.ai)
+      })) : null
+    };
+  } catch(e){ console.warn('setup load failed', e); return null; }
+}
+
+  (function(){
   // Toast with adjustable duration (defaults to ~3.5s) and proper clearing
   let _toastTimer=null;
   const toast=(m, ms=3500)=>{
@@ -176,6 +195,7 @@
   const tokenTag=()=>tag('tokenTag');
   const tokenCount=()=>tag('tokenCount');
   const btn=(id)=>document.getElementById(id);
+  
 
   // Colors & constants
   const COLORS={ bg:'#0b0f18', grid:'#263145', gear:'#202a3d', track:'#6d7aa6', block:'#434b63', slot:'#a8b7ff', hilite:'#9efff4', tokenR:'#ff6b6b', tokenG:'#6bff95', tokenB:'#6bd9ff', tokenY:'#ffef6b', edge:'#f4b86a', hint:'#c7f0ff' };
@@ -962,9 +982,24 @@ function cornerFor(pid){
   // Game flow
   function newGame(){
     state.N = parseInt(UI.boardSize().value,10);
+    state.N = parseInt((state.setup?.boardSize ?? UI.boardSize().value ?? 9), 10);
     state.board = makeBoard(state.N);
     initGearOffsets(state.N); // <- add this
-    state.players = PLAYERS.map(p=>({...p, deck:makeDeck(state.N), drawn:null, tokens:0, tokensRemoved:0, drawLocked:false, drawUsed:false, tokenUsed:false, rollUsed:false, skipCount: 0, elbowSkipCount: 0, forceElbow: false }));
+    // state.players = PLAYERS.map(p=>({...p, deck:makeDeck(state.N), drawn:null, tokens:0, tokensRemoved:0, drawLocked:false, drawUsed:false, tokenUsed:false, rollUsed:false, skipCount: 0, elbowSkipCount: 0, forceElbow: false }));
+    state.players = PLAYERS.map(p=>{
+      const cfg = (state.setup?.players && state.setup.players[p.id]) || { name:p.name, ai:false };
+      return {
+        id: p.id,
+        name: cfg.name || p.name,
+        color: p.color,
+        pocket: p.pocket,
+        ai: !!cfg.ai,
+        deck: makeDeck(state.N),
+        drawn:null, tokens:0, tokensRemoved:0,
+        drawLocked:false, drawUsed:false, tokenUsed:false, rollUsed:false,
+        skipCount: 0, elbowSkipCount: 0, forceElbow: false
+      };
+    });    
     state.cornerLockTurns = PLAYERS.map(() => 0);
     state.cornerSealed    = PLAYERS.map(() => false);
     state.current = 0;
@@ -984,6 +1019,11 @@ function cornerFor(pid){
     state._animating = false;
     if (Array.isArray(state.players)) for (const pl of state.players) pl.tokens = 0;
     refreshBoardSaturation();
+      // >>> add this at the very end of newGame():
+    requestAnimationFrame(()=>{
+      resize();
+      requestAnimationFrame(resize);
+    });
   }
 
   function startTurn(){
@@ -2038,6 +2078,11 @@ function checkForceElbow(P){
 
   // Wire buttons
   btn('newGameBtn').addEventListener('click', newGame);
+  document.getElementById('returnMenuBtn').addEventListener('click', ()=>{
+    const ok = confirm('Return to Main Menu? Current game progress will be lost unless you saved.');
+    if (!ok) return;
+      window.location.href = 'MainMenu.html';
+  });
   btn('drawBtn').addEventListener('click', drawCard);
   btn('placeBtn').addEventListener('click', placeMode);
   btn('bottomBtn').addEventListener('click', bottomCard);
@@ -2747,13 +2792,26 @@ function checkForceElbow(P){
 
   // initial
   resize();
-  startTurn();
-  setStatus('New Game → Draw → Place. First placement is your corner.');
+
+  // ---- STARTUP ENTRY POINT (runs once the DOM is ready) ----
+  document.addEventListener('DOMContentLoaded', function(){
+    try {
+      // Read menu setup (saved by MainMenu.html) into THIS IIFE's state
+      if (typeof loadSetupFromStorage === 'function') {
+        const s = loadSetupFromStorage();
+        if (s) {
+          state.setup = s;
+          // keep sidebar Board Size dropdown visually in sync if it's on-screen
+          const dd = document.getElementById('boardSize');
+          if (dd) dd.value = String(s.boardSize);
+        }
+      }
+      // Build board & start the game using state.setup (7x7/9x9, names, AI flags)
+      newGame();
+    } catch (e) {
+      console.error(e);
+    }
+  });
 })();</script>
-<script>
-document.addEventListener('DOMContentLoaded', function(){
-  try { if (typeof newGame === 'function') newGame(); } catch(e){ console.error(e); }
-});
-</script>
 </body>
 </html>
