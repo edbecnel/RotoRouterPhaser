@@ -210,6 +210,51 @@ If you Bottom it, your Draw state is set to **Used** — you must wait for your 
 - `loadSetupFromStorage()` reads/normalizes `rr.setup` (board size + players/AI).
 - Sidebar **Board Size** dropdown is kept visually in sync with `state.setup.boardSize`.
 
+### 22) New track types: **T** and **RT (Rotatable T)**
+
+- **T** = 3-way junction. Base openings: **E, W, N** (closed S). Rotations cover the other three T shapes.
+- **RT** rotates an existing **T** in-place (analogous to **RS/RE**).
+- Rendering: T draws a horizontal bar + an upward stem (matches base openings). Rotation preview (Q/E) and ghost behave like other tracks.
+- Connectivity/path checks use `OPENINGS.T`, so BFS/reciprocal logic works without special cases.
+
+### 23) Deck updates (with T/RT)
+
+- **7×7:** `Straight: 7, Elbow: 6, Cross: 1, T: 3, RS: 3, RE: 2, RC: 1, RT: 1`
+- **9×9:** `Straight: 9, Elbow: 8, Cross: 1, T: 3, RS: 4, RE: 3, RC: 2, RT: 2`
+- Notes:
+  - Straights reduced by **1 (7×7)** and **2 (9×9)**, then **+1 T** added to both sizes.
+  - Total deck sizes preserved versus prior build.
+
+### 24) Placement & rotate/replace updates for T/RT
+
+- **RT** highlights any placed **T**; clicking enters **rotateExisting** and confirms on second click (same flow as RS/RE).
+- `computePlaceHighlights()` treats **RS/RE/RT** uniformly when selecting existing tiles to rotate.
+- **RC** unchanged (replace/rotate Cross behavior as before).
+
+### 25) Scoring consistency on opponent corners (no ghost tokens)
+
+- When a token **scores** (lands on an opponent’s corner), the mover’s token is:
+  - **Always removed** from its **source** cell, and
+  - **Never left** on the destination corner.
+- Fixes the case where **Score = 1/3** but **3 tokens** still appeared on the board.
+
+### 26) Legacy/Undo safety: prevent over-placement, but show the truth
+
+- Token placement uses an **effective removed** count = `max(tokensRemoved, reached.size)` to block illegal “extra” placements after Undo into old snapshots.
+- The **HUD still shows the actual** count (`tokensRemoved + onBoard`) so anomalies remain visible.
+
+### 27) HUD token counter (actual placed + mismatch hint)
+
+- “**Token: X/3**” displays **actual placed** only.
+- If `actualPlaced < (reached.size + onBoard)`, the HUD adds a subtle **⚠** and tooltip explaining the mismatch (does not affect rules).
+
+---
+
+## Updated Deck (with T/RT) — supersedes older counts
+
+- **7×7:** `Straight 7, Elbow 6, Cross 1, T 3, RS 3, RE 2, RC 1, RT 1`
+- **9×9:** `Straight 9, Elbow 8, Cross 1, T 3, RS 4, RE 3, RC 2, RT 2`
+
 ## Developer Notes
 
 ### Undo/Redo config

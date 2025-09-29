@@ -199,7 +199,10 @@ function loadSetupFromStorage(){
 
   // Colors & constants
   const COLORS={ bg:'#0b0f18', grid:'#263145', gear:'#202a3d', track:'#6d7aa6', block:'#434b63', slot:'#a8b7ff', hilite:'#9efff4', tokenR:'#ff6b6b', tokenG:'#6bff95', tokenB:'#6bd9ff', tokenY:'#ffef6b', edge:'#f4b86a', hint:'#c7f0ff' };
-  const TrackCard={ Straight:'Straight', Elbow:'Elbow', Cross:'Cross', RStraight:'RS', RElbow:'RE', RCross:'RC' };
+  const TrackCard={
+    Straight:'Straight', Elbow:'Elbow', Cross:'Cross', T:'T',
+    RStraight:'RS', RElbow:'RE', RCross:'RC', RT:'RT'
+  };
   const DIE_FACES=['X','X','X','CW90','CW90','CCW90','CCW90','DEG180'];
   const TOKENS_MAX=3;
   const PLAYERS=[
@@ -236,13 +239,14 @@ function loadSetupFromStorage(){
     turn:    true      // allow Player-turn-scoped undo/redo
   };
 
-
   // Openings — Elbow base = EAST+NORTH (NE), Straight is horizontal base
   const OPENINGS={
-    Straight: [[1,0],[-1,0]],
-    Elbow: [[1,0],[0,-1]],
-    Cross: [[1,0],[-1,0],[0,1],[0,-1]]
+    Straight: [[1,0],[-1,0]],            // base: horizontal
+    Elbow:    [[1,0],[0,-1]],            // base: TURNS from East to North
+    Cross:    [[1,0],[-1,0],[0,1],[0,-1]],
+    T:        [[1,0],[-1,0],[0,-1]]      // base: ┴  (open E, W, N; closed S) — rotation adds others
   };
+
   function rotDir([dx,dy],deg){ const t=((deg%360)+360)%360; if(t===0) return [dx,dy]; if(t===90) return [-dy,dx]; if(t===180) return [-dx,-dy]; if(t===270) return [dy,-dx]; return [dx,dy]; }
   function rotatedOpenings(cell){
     if(!cell.track || cell.track==='Block') return [];
@@ -259,18 +263,25 @@ function loadSetupFromStorage(){
   function shuffle(a){ for(let i=a.length-1;i>0;i--){ const j=Math.floor(Math.random()*(i+1)); [a[i],a[j]]=[a[j],a[i]]; } return a; }
   function makeDeck(size){
     const cfgMap = {
-      7: { Straight:10, Elbow:6, RStraight:3, RElbow:2, Cross:2, RCross:1 },
-      9: { Straight:13, Elbow:8, RStraight:4, RElbow:3, Cross:2, RCross:2 },
+      // 7×7
+      7: { Straight:7,  Elbow:6,  Cross:1,  T:3,
+          RStraight:3, RElbow:2, RCross:1, RT:1 },
+      // 9×9
+      9: { Straight:9,  Elbow:8,  Cross:1,  T:3,
+          RStraight:4, RElbow:3, RCross:2, RT:2 },
     };
     const cfg = cfgMap[size] || (size <= 7 ? cfgMap[7] : cfgMap[9]);
     return {
       draw: shuffle([
-        ...Array(cfg.Straight).fill(TrackCard.Straight),
-        ...Array(cfg.Elbow).fill(TrackCard.Elbow),
-        ...Array(cfg.RStraight).fill(TrackCard.RStraight),
-        ...Array(cfg.RElbow).fill(TrackCard.RElbow),
-        ...Array(cfg.Cross).fill(TrackCard.Cross),
-        ...Array(cfg.RCross).fill(TrackCard.RCross),
+        ...Array(cfg.Straight||0).fill(TrackCard.Straight),
+        ...Array(cfg.Elbow||0).fill(TrackCard.Elbow),
+        ...Array(cfg.Cross||0).fill(TrackCard.Cross),
+        ...Array(cfg.T||0).fill(TrackCard.T),
+
+        ...Array(cfg.RStraight||0).fill(TrackCard.RStraight),
+        ...Array(cfg.RElbow||0).fill(TrackCard.RElbow),
+        ...Array(cfg.RCross||0).fill(TrackCard.RCross),
+        ...Array(cfg.RT||0).fill(TrackCard.RT),
       ]),
       discard: []
     };
@@ -1351,10 +1362,10 @@ function computePlaceHighlights(){
     }
   }
 
-  /* RSRE HIGHLIGHTS */
+  /* RS/RE/RT HIGHLIGHTS (rotate existing of same base type) */
   const D = currentPlayer().drawn;
   const base = baseDrawnType(D);
-  if (D===TrackCard.RStraight || D===TrackCard.RElbow){
+  if (D===TrackCard.RStraight || D===TrackCard.RElbow || D===TrackCard.RT){
     for(let yy=0; yy<state.N; yy++){
       for(let xx=0; xx<state.N; xx++){
         const c = state.board[yy][xx];
@@ -1510,25 +1521,30 @@ function canPlaceCardNow(playerId, cardType){
 
 function baseDrawnType(card){
   if(card===TrackCard.RStraight) return TrackCard.Straight;
-  if(card===TrackCard.RElbow)   return TrackCard.Elbow;
-  if(card===TrackCard.RCross)   return TrackCard.Cross;
+  if(card===TrackCard.RElbow)    return TrackCard.Elbow;
+  if(card===TrackCard.RCross)    return TrackCard.Cross;
+  if(card===TrackCard.RT)        return TrackCard.T;
   return card;
 }
 
 function isTrackCard(card){
-  return [TrackCard.Straight, TrackCard.Elbow, TrackCard.Cross,
-          TrackCard.RStraight, TrackCard.RElbow, TrackCard.RCross].includes(card);
+  return [
+    TrackCard.Straight, TrackCard.Elbow, TrackCard.Cross, TrackCard.T,
+    TrackCard.RStraight, TrackCard.RElbow, TrackCard.RCross, TrackCard.RT
+  ].includes(card);
 }
 
 function isRotationCard(card){
-  return card===TrackCard.RStraight || card===TrackCard.RElbow || card===TrackCard.RCross;
+  return card===TrackCard.RStraight || card===TrackCard.RElbow || card===TrackCard.RCross || card===TrackCard.RT;
 }
 
 function hasRotationInDeck(P){
   const draw = (P.deck && Array.isArray(P.deck.draw)) ? P.deck.draw : [];
   const disc = (P.deck && Array.isArray(P.deck.discard)) ? P.deck.discard : [];
   const all  = draw.concat(disc);
-  return all.some(c => c===TrackCard.RStraight || c===TrackCard.RElbow || c===TrackCard.RCross);
+  return all.some(c =>
+    c===TrackCard.RStraight || c===TrackCard.RElbow || c===TrackCard.RCross || c===TrackCard.RT
+  );
 }
 
 function checkForcePlace(){
@@ -1644,8 +1660,12 @@ function checkForceElbow(P){
     const corner = cornerFor(P.id);
     const cCell = state.board[corner.y][corner.x];
     const myCount = countTokens(P.id);
-    const lifetimePlaced = (P.tokensRemoved|0) + myCount; // placed so far = removed + currently on board
-    if(lifetimePlaced < TOKENS_MAX && cCell.track && cCell.token==null){
+    // Safety: treat "removed" as max(tokensRemoved, reached.size) so old snapshots can’t over-place
+    const reachedCount = P.reached ? (P.reached instanceof Set ? P.reached.size : new Set(P.reached).size) : 0;
+    const effectiveRemoved = Math.max((P.tokensRemoved|0), reachedCount);
+    const lifetimePlaced = Math.min(TOKENS_MAX, effectiveRemoved + myCount);
+
+    if (lifetimePlaced < TOKENS_MAX && cCell.track && cCell.token == null) {
       options.push(corner);
     }
     state.highlight = options;
@@ -1892,7 +1912,7 @@ function checkForceElbow(P){
 
       // === RS/RE: ENTER rotateExisting BEFORE legal-cell gating ===
       // Allow rotating ANY existing tile of the same base type (even on first turn).
-      if (cell.track && (P.drawn===TrackCard.RStraight || P.drawn===TrackCard.RElbow)) {
+      if (cell.track && (P.drawn===TrackCard.RStraight || P.drawn===TrackCard.RElbow || P.drawn===TrackCard.RT)) {
         const base = baseDrawnType(P.drawn);
         if (cell.track === base) {
           state.subphase='rotateExisting';
@@ -1980,8 +2000,15 @@ function checkForceElbow(P){
         if(corner.x===x && corner.y===y){
           const cCell = state.board[corner.y][corner.x];
           const myCount = countTokens(P.id);
-          const lifetimePlaced = (P.tokensRemoved|0) + myCount;
-          if(lifetimePlaced >= TOKENS_MAX){ toast('You have already used all 3 tokens.'); return; }
+          // Safety: don’t let legacy snapshots over-place
+          const reachedCount = P.reached ? (P.reached instanceof Set ? P.reached.size : new Set(P.reached).size) : 0;
+          const effectiveRemoved = Math.max((P.tokensRemoved|0), reachedCount);
+          const lifetimePlaced = Math.min(TOKENS_MAX, effectiveRemoved + myCount);
+
+          if (lifetimePlaced >= TOKENS_MAX) {
+            toast('You have already used all 3 tokens.');
+            return;
+          }
           if(!(cCell.track && (cCell.token==null))){ toast('Corner must have a track and be open.'); return; }
           pushHistory('Token: place');
           cCell.token = P.id; state.players[P.id].tokens = myCount+1;
@@ -1995,33 +2022,31 @@ function checkForceElbow(P){
         const legal = state.highlight.some(h=>h.x===x&&h.y===y);
         if(!legal){ toast('Pick a connected destination.'); return; }
         const from = state.tokenSelect;
-        // Scoring: if placed onto an opponent's corner, increment score and remove the token
-        (() => {
-              const P = currentPlayer();
-              const oppId = opponentCornerAt(x,y,P.id);
-              const destHasOwner = (oppId != null && state.board[y][x].token === oppId);
-              pushHistory('Token: move');
-              // Remove token from source
-              state.board[from.y][from.x].token = null;
-              // Only place our token if destination doesn’t already hold its owner’s token
-              if (!destHasOwner) state.board[y][x].token = P.id;
-              // Scoring: arrival on an opponent corner
-              if (oppId != null){
-                if (!P.reached) P.reached = new Set();
-                const oppName = PLAYERS[oppId].name;
-                P.reached.add(oppName);
-                // If we placed our token, remove it after scoring; otherwise leave owner token as-is
-                if (!destHasOwner) {
-                  state.board[y][x].token = null;
-                  // Lifetime removal: we lost a token here
-                  P.tokensRemoved = (P.tokensRemoved|0) + 1;
-                }                
-                setStatus(P.name + ' scored at ' + oppName + "'s corner!");
-              } else {
-                setStatus('Token moved.');
-              }
-        })();
-
+        // Move / Score handling (fix: always remove moving token on scoring; never leave extra token on board)
+        pushHistory('Token: move');
+        // 1) Clear the moving token from its source cell (always)
+        if (from && within(from.x, from.y) && state.board[from.y][from.x].token === P.id) {
+          state.board[from.y][from.x].token = null;
+        }
+        const oppId = opponentCornerAt(x, y, P.id);
+        const destHasOwner = (oppId != null && state.board[y][x].token === oppId);
+        if (oppId != null) {
+          // 2) Reached an opponent's corner → record score
+          if (!P.reached) P.reached = new Set();
+          const oppName = PLAYERS[oppId].name;
+          P.reached.add(oppName);
+          // 3) Do NOT leave our token on the destination (corner stays with its owner’s token if present)
+          if (state.board[y][x].token === P.id) {
+            state.board[y][x].token = null;
+          }
+          // 4) Count this token as removed from play
+          P.tokensRemoved = Math.min(TOKENS_MAX, (P.tokensRemoved|0) + 1);
+          setStatus(P.name + ' scored at ' + oppName + "'s corner!");
+        } else {
+          // Normal move to a non-scoring cell → place our token there
+          state.board[y][x].token = P.id;
+          setStatus('Token moved.');
+        }
         // If that move completed 3/3 corners, auto-end the turn immediately.
         if (playerHasFinished(currentPlayer())) {
           const P = currentPlayer();
@@ -2370,13 +2395,39 @@ function checkForceElbow(P){
     }
 
     tokenTag().textContent = 'Token: ' + (P.tokenUsed ? 'Used' : 'Ready');
+    
+    // --- TOKEN COUNT (show the *actual* count) ---
     (function(){
       const el = document.getElementById('tokenCount');
       if (!el) return;
+
       const onBoard = countTokens(P.id);
-      const placed = Math.max(0, Math.min(TOKENS_MAX, (P.tokensRemoved|0) + onBoard));
-      el.textContent = 'Token: ' + placed + '/' + TOKENS_MAX; // shows tokens placed so far
-    })();    
+      const removed = (P.tokensRemoved|0);
+      const actualPlaced = Math.min(TOKENS_MAX, removed + onBoard);
+
+      // Show the ACTUAL number (no safety inflation)
+      el.textContent = 'Token: ' + actualPlaced + '/' + TOKENS_MAX;
+
+      // If there is a mismatch between scored corners and removed tokens, surface it (subtle warning).
+      // This does NOT affect the displayed number.
+      const reachedCount =
+        P.reached ? (P.reached instanceof Set ? P.reached.size : new Set(P.reached).size) : 0;
+      const expectedMin = Math.min(TOKENS_MAX, reachedCount + onBoard);
+
+      if (actualPlaced < expectedMin) {
+        // Mismatch: we've scored more corners than tokensRemoved reflects.
+        el.textContent += ' ⚠';
+        el.title = `Mismatch detected: reached=${reachedCount}, onBoard=${onBoard}, tokensRemoved=${removed}`;
+        // Optional: tint the text to draw attention. Remove if you prefer no color change.
+        el.style.color = '#ffb020';
+        el.style.fontWeight = '600';
+      } else {
+        // Clear any prior styling/tooltips if mismatch resolved
+        el.removeAttribute('title');
+        el.style.color = '';
+        el.style.fontWeight = '';
+      }
+    })();
 
     (function(){
       const el = document.getElementById('skippedTag');
@@ -2712,11 +2763,20 @@ function checkForceElbow(P){
     } else {
       ctx.fillStyle=COLORS.track; ctx.beginPath(); ctx.arc(0,0,r,0,Math.PI*2); ctx.fill();
       ctx.strokeStyle=COLORS.slot; ctx.lineWidth=6;
-      if(type==='Straight'){ ctx.beginPath(); ctx.moveTo(-r*0.85,0); ctx.lineTo(r*0.85,0); ctx.stroke(); }
-      if(type==='Elbow'){ ctx.beginPath(); ctx.moveTo(0,-r*0.85); ctx.lineTo(0,0); ctx.lineTo(r*0.85,0); ctx.stroke(); }
+      if(type==='Straight'){
+        ctx.beginPath(); ctx.moveTo(-r*0.85,0); ctx.lineTo(r*0.85,0); ctx.stroke();
+      }
+      if(type==='Elbow'){
+        ctx.beginPath(); ctx.moveTo(0,-r*0.85); ctx.lineTo(0,0); ctx.lineTo(r*0.85,0); ctx.stroke();
+      }
       if(type==='Cross'){
         ctx.beginPath(); ctx.moveTo(-r*0.85,0); ctx.lineTo(r*0.85,0); ctx.stroke();
         ctx.beginPath(); ctx.moveTo(0,-r*0.85); ctx.lineTo(0,r*0.85); ctx.stroke();
+      }
+      if(type==='T'){
+        // Base orientation matches OPENINGS T: E, W, N (closed South). Rotation handles others.
+        ctx.beginPath(); ctx.moveTo(-r*0.85,0); ctx.lineTo(r*0.85,0); ctx.stroke(); // horizontal bar
+        ctx.beginPath(); ctx.moveTo(0,-r*0.85); ctx.lineTo(0,0); ctx.stroke();      // stem up
       }
     }
     ctx.restore();
