@@ -30,6 +30,7 @@
       color: #c00;       /* red text */
       font-weight: 600;  /* bold */
     }
+    .ok { color:#28d07a; font-weight:700; }
   </style>
 </head>
 <body>
@@ -280,8 +281,12 @@
     history: [],        // Global undo stack (array of snapshots)
     redo:    [],        // Global redo stack
     turnHistory: [],    // Per-turn undo stack (current player's turn)
-    turnRedo:   []      // Per-turn redo stack
+    turnRedo:   [],      // Per-turn redo stack
+    forceElbowFor: null  // If set to a player id, that player must place an Elbow this turn (but only if placement is possible)
   };
+  
+
+
   const canvas=UI.canvas(); const ctx=canvas.getContext('2d');
 
   // ==== UNDO / REDO HELPERS ====
@@ -609,29 +614,51 @@
       };
     });
 
-    // --- Legacy backfill for tokensRemoved (older saves lacked this field) ---
-    // If a player's tokensRemoved was 0 in the file (or absent) but they are clearly out,
-    // infer a sensible value so "skip-out player" works.
+    // --- Robust legacy backfill for token counts ---
+    // Newer code treats:
+    //   tokensRemoved = lifetime tokens that have been removed from board (scored or otherwise gone)
+    //   onBoard       = count of tokens currently on the board
+    //   placed        = tokensRemoved + onBoard  (0..TOKENS_MAX)
+    // Older saves often had `tokens: 3` for everyone and it did NOT mean "placed".
     for (const p of state.players) {
-      const src = snap.players.find(pp => pp.id === p.id);
-      const hadField = src && Object.prototype.hasOwnProperty.call(src, 'tokensRemoved');
-      if (!hadField || (src.tokensRemoved|0) === 0) {
-        const onBoard = countTokens(p.id);
-        const reachedLen = (p.reached && typeof p.reached.size === 'number')
-          ? p.reached.size
-          : Array.isArray(src?.reached) ? src.reached.length : 0;
-        // Heuristic:
-        // 1) Minimum removed cannot exceed 3 and is at least the number of scored arrivals
-        //    where we likely removed our token (common case).
-        // 2) If no tokens on board and we can't tell, assume they've exhausted supply.
-        let inferred = Math.min(TOKENS_MAX, reachedLen);
-        if (onBoard === 0 && inferred === 0) {
-          // Legacy saves often omit enough info to differentiate; favor “out” so turn-skips work.
-          inferred = TOKENS_MAX;
+      const src = snap.players.find(pp => pp.id === p.id) || {};
+      const onBoard = countTokens(p.id);
+      const reachedLen =
+        p.reached instanceof Set ? p.reached.size :
+        Array.isArray(src.reached) ? src.reached.length : 0;
+
+      const hasTokensRemoved = Number.isFinite(src.tokensRemoved);
+      let tokensRemoved = hasTokensRemoved ? Math.max(0, Math.min(TOKENS_MAX, src.tokensRemoved|0)) : null;
+
+      // Try to interpret legacy `tokens` if present.
+      // Case A: it might be "remaining to place" (0..3). If so, remaining + onBoard + removed == TOKENS_MAX.
+      let legacyTokens = Number.isFinite(src.tokens) ? Math.max(0, Math.min(TOKENS_MAX, src.tokens|0)) : null;
+      let remainingGuess = null;
+      if (legacyTokens != null) {
+        // Treat as "remaining" if it yields a consistent total ≤ TOKENS_MAX when combined with onBoard and reached/removed.
+        // Prefer using explicit tokensRemoved if provided; else fall back to reached count as a proxy for removals.
+        const removedGuessFromReached = Math.max(0, Math.min(TOKENS_MAX, reachedLen));
+        const removedRef = (tokensRemoved != null) ? tokensRemoved : removedGuessFromReached;
+        const total = legacyTokens + onBoard + removedRef;
+        if (total === TOKENS_MAX) {
+          remainingGuess = legacyTokens;
+          if (tokensRemoved == null) tokensRemoved = removedRef;
         }
-        p.tokensRemoved = Math.max(p.tokensRemoved|0, inferred|0);
       }
-    }    
+
+      // If we still don’t have tokensRemoved, infer from reached (common rule: scoring removes your token).
+      if (tokensRemoved == null) tokensRemoved = Math.max(0, Math.min(TOKENS_MAX, reachedLen));
+
+      // If even that yields zero evidence AND nothing is on the board, assume they’re “out” to avoid soft-locks.
+      if (tokensRemoved === 0 && onBoard === 0 && legacyTokens == null && reachedLen === 0) {
+        tokensRemoved = TOKENS_MAX;
+      }
+
+      // Finalize
+      p.tokensRemoved = Math.max(0, Math.min(TOKENS_MAX, tokensRemoved));
+      // Keep p.tokens coherent going forward: placed = removed + onBoard (cap at TOKENS_MAX).
+      p.tokens = Math.max(0, Math.min(TOKENS_MAX, p.tokensRemoved + onBoard));
+    }
 
     // Turn + corner bookkeeping
     state.current = (snap.current|0) % state.players.length;
@@ -847,6 +874,14 @@ function cornerFor(pid){
     return arr;
   }
 
+  function playerHasFinished(P){
+    if (!P) return false;
+    const reached = P.reached
+      ? (P.reached instanceof Set ? P.reached : new Set(P.reached))
+      : new Set();
+    return reached.size >= 3;
+  }
+
   // BFS for token moves — by default do NOT pass through any tokens.
   // If no destinations exist under that rule, do a fallback BFS that allows
   // pass-through over *opponent* tokens (never over your own). Corners can’t
@@ -873,8 +908,24 @@ function cornerFor(pid){
 
           const oppId = opponentCornerAt(nx,ny,pid);
           const ownerOnOwnCorner = (oppId!=null && there.token===oppId);
+          if (oppId != null) {
+            // If this opponent's corner has ALREADY been reached by this player,
+           // do NOT offer it again as a destination.
+            const P = state.players[pid];
+            const reachedSet = P?.reached
+              ? (P.reached instanceof Set ? P.reached : new Set(P.reached))
+              : new Set();
+            const oppName = PLAYERS[oppId].name;
 
-          // Corners can't be blocked: moving onto opponent's corner is legal terminal.
+            if (reachedSet.has(oppName)) {
+              // We've already scored this opponent; their corner should not be reachable again.
+              vis.add(k);
+              // Do not add to 'out' and do not traverse beyond the corner.
+              continue;
+            }
+          }
+          // Corners can't be blocked: moving onto opponent's corner (with their token present)
+          // is a legal terminal IF not already scored above.
           if (ownerOnOwnCorner){
             vis.add(k);
             out.push({x:nx,y:ny});
@@ -917,6 +968,7 @@ function cornerFor(pid){
     state.cornerLockTurns = PLAYERS.map(() => 0);
     state.cornerSealed    = PLAYERS.map(() => false);
     state.current = 0;
+    state.forceElbowFor = null;
 
     // Reset undo/redo
     state.history = []; state.redo = [];
@@ -935,20 +987,33 @@ function cornerFor(pid){
   }
 
   function startTurn(){
-    const P=currentPlayer();
+    // Find the next *active* player without recursive calls.
+    let hops = 0;
+    while (hops < state.players.length) {
+      const Ptest = state.players[state.current];
+      const onBoardTest = countTokens(Ptest.id);
+      const finished    = playerHasFinished(Ptest);
+      const outOfTokens = ((Ptest.tokensRemoved|0) >= TOKENS_MAX) && onBoardTest === 0;
+      if (!finished && !outOfTokens) break;          // active turn found
+
+      // Skip this player and try the next
+      toast(Ptest.name + (finished ? ' has finished (3/3 corners)' : ' has no tokens remaining') + ' — skipping turn.');
+      state.current = (state.current + 1) % state.players.length;
+      hops++;
+    }
+    if (hops >= state.players.length) {
+      // No active players remain → game over
+      state.phase = 'gameOver';
+      // setStatus('<span style="color:#28d07a; font-weight:700;">All players have finished — game over.</span>');
+      setStatus('<span class="ok">All players have finished — game over.</span>');
+      updateHUD();
+      return;
+    }
+
+    const P = currentPlayer();
     resetTurnHistory();
     P.drawLocked=false; P.drawUsed=false; P.tokenUsed=false; P.rollUsed=false;
-    // --- OUT-OF-GAME SKIP: if all 3 tokens have been removed AND none are on board, skip this player ---
-    const onBoard = countTokens(P.id);
-    if ((P.tokensRemoved|0) >= TOKENS_MAX && onBoard === 0) {
-      // Advance to next player without enabling any actions
-      toast(P.name + ' has no tokens remaining — skipping turn.');
-      state.current = (state.current + 1) % state.players.length;
-      // Guard: if everyone is out, avoid infinite loop (no-op turns); let it proceed.
-      startTurn();
-      return;
-    }    
-
+    P.rotatedThisTurn = false;  // track meaningful board action
     state.deadFixDoneThisTurn = false;
     state.phase='idle'; state.subphase=null; state.highlight=[]; state.hover=null; state.previewRot=0; state.die=null; state.tokenSelect=null; state.rotateFocus=null;
     checkForcePlace();
@@ -1008,8 +1073,8 @@ function cornerFor(pid){
 
     state.current=(state.current+1)%state.players.length;
     startTurn();
-    // Don't overwrite Corner or Dead-Straight Fix prompts after startTurn()
-    if (state.phase !== 'cornerFix' && state.phase !== 'deadFix') {
+    // Don't overwrite Fix prompts or GameOver after startTurn()
+    if (state.phase !== 'cornerFix' && state.phase !== 'deadFix' && state.phase !== 'gameOver') {
       setStatus('Turn passed.');
     }
     state.turnAdvancing=false;
@@ -1042,6 +1107,19 @@ function cornerFor(pid){
     if(P.deck.draw.length===0 && P.deck.discard.length>0){ P.deck.draw=shuffle(P.deck.discard.splice(0)); }
     if(P.deck.draw.length===0){ setStatus('Deck empty.'); return; }
     P.drawn=P.deck.draw.shift();
+    // If max-skips is forcing placement but this card cannot be placed anywhere,
+    // waive the force rule now to avoid deadlocks.
+    checkForcePlace();
+    updateHUD();
+    // If elbow is being forced and an Elbow was drawn but can't be placed, waive the force.
+    if (state.forceElbowFor === P.id && P.drawn === TrackCard.Elbow) {
+      if (!canPlaceElbowNow(P.id)) {
+        state.forceElbowFor = null;
+        setStatus('Force (Elbow) waived — no legal Elbow placement.');
+        updateHUD();
+      }
+    }
+
     // While forced, we don't mark Draw as "Used" so the button stays enabled until a placement happens.
     P.drawUsed = state.forcePlace ? false : true;    
     updateHUD();
@@ -1052,8 +1130,7 @@ function cornerFor(pid){
     }
   }
 
-  // Placement includes adjacency to player's tokens (even if token is on opponent tile)
-  
+// Placement includes adjacency to player's tokens (even if token is on opponent tile)
 function connectedTrackFromCorner(pid){
   const start = cornerFor(pid);
   const key = (x,y)=>x+','+y;
@@ -1083,6 +1160,42 @@ function connectedTrackFromCorner(pid){
   }
   return comp;
 }
+
+function connectedTrackFrom(x0, y0){
+  const key = (x,y)=>x+','+y;
+  const vis = new Set();
+  const comp = [];
+  if (!within(x0,y0)) return comp;
+  const start = state.board[y0][x0];
+  if (!start.track) return comp;
+
+  const q = [{x:x0,y:y0}];
+  vis.add(key(x0,y0));
+  comp.push({x:x0,y:y0});
+
+  while(q.length){
+    const {x,y} = q.shift();
+    const here = state.board[y][x];
+    if(!here.track || here.track==='Block') continue;
+
+    for(const [dx,dy] of rotatedOpenings(here)){
+      const nx = x+dx, ny = y+dy;
+      if(!within(nx,ny)) continue;
+      const there = state.board[ny][nx];
+      if(!there.track || there.track==='Block') continue;
+      if(!hasReciprocal(here, there, dx, dy)) continue;
+
+      const k = key(nx,ny);
+      if(!vis.has(k)){
+        vis.add(k);
+        q.push({x:nx,y:ny});
+        comp.push({x:nx,y:ny});
+      }
+    }
+  }
+  return comp;
+}
+
 
 // Start: Code to prevent "corner-lockout"
 function cornerNeighbors(pid){ // returns [{x,y} corner, {x,y} n1, {x,y} n2]
@@ -1178,6 +1291,25 @@ function computePlaceHighlights(){
   const net = connectedTrackFromCorner(pid);
   const myTokens = allTokensOf(pid);
   const adj = new Map();
+
+  // Adjacent to networks connected to ANY of my tokens (ownership-agnostic)
+  // This fixes the “two cells away via a connected straight” case.
+  for (const t of myTokens){
+    const comp = connectedTrackFrom(t.x, t.y);
+    for (const p of comp){
+      const neighs = [
+        [p.x+1, p.y], [p.x-1, p.y],
+        [p.x, p.y+1], [p.x, p.y-1]
+      ];
+      for (const [x,y] of neighs){
+        if(!within(x,y)) continue;
+        const c = state.board[y][x];
+        if(!c.track && c.token==null){
+          adj.set(x+','+y, {x,y});
+        }
+      }
+    }
+  }
 
   /* RSRE HIGHLIGHTS */
   const D = currentPlayer().drawn;
@@ -1287,6 +1419,55 @@ function canPlaceDrawnNow(pid){
   }
 }
 
+// Can the current player place an Elbow *anywhere* right now?
+function canPlaceElbowNow(playerId){
+  const P = state.players.find(pp => pp.id === playerId);
+  if (!P) return false;
+
+  const saved = P.drawn;
+  P.drawn = TrackCard.Elbow;
+  let ok = false;
+  try {
+    if (typeof canPlaceDrawnNow === 'function') {
+      ok = !!canPlaceDrawnNow(playerId);
+    } else {
+      const prevPhase = state.phase, prevSub = state.subphase, prevHL = state.highlight;
+      state.phase = 'place'; state.subphase = null; state.highlight = [];
+      computePlaceHighlights();
+      ok = Array.isArray(state.highlight) && state.highlight.length > 0;
+      state.phase = prevPhase; state.subphase = prevSub; state.highlight = prevHL;
+    }
+  } finally {
+    P.drawn = saved; // restore
+  }
+  return ok;
+}
+
+
+function canPlaceCardNow(playerId, cardType){
+  const P = state.players.find(pp => pp.id === playerId);
+  if (!P) return false;
+
+  const saved = P.drawn;
+  P.drawn = cardType;
+
+  let ok = false;
+  try {
+    if (typeof canPlaceDrawnNow === 'function') {
+      ok = !!canPlaceDrawnNow(playerId);
+    } else {
+      const prevPhase = state.phase, prevSub = state.subphase, prevHL = state.highlight;
+      state.phase = 'place'; state.subphase = null; state.highlight = [];
+      computePlaceHighlights();
+      ok = Array.isArray(state.highlight) && state.highlight.length > 0;
+      state.phase = prevPhase; state.subphase = prevSub; state.highlight = prevHL;
+    }
+  } finally {
+    P.drawn = saved;
+  }
+  return ok;
+}
+
 function baseDrawnType(card){
   if(card===TrackCard.RStraight) return TrackCard.Straight;
   if(card===TrackCard.RElbow)   return TrackCard.Elbow;
@@ -1330,8 +1511,13 @@ function checkForcePlace(){
 }
 
 function checkForceElbow(P){
-  // Set a persistent flag once the player has skipped 3 elbows.
-  P.forceElbow = (!state.boardSaturated) && (P.elbowSkipCount >= 3);
+  // Threshold: must have skipped ≥3 Elbows *and* the board isn't saturated in a way that blocks placement.
+  const mustForce = (P.elbowSkipCount|0) >= 3;
+  if (mustForce && canPlaceElbowNow(P.id)) {
+    state.forceElbowFor = P.id;   // only force if an Elbow can actually be placed now
+  } else {
+    state.forceElbowFor = null;   // waive otherwise (prevents deadlocks)
+  }
 }
 
   function placeMode(){
@@ -1343,6 +1529,19 @@ function checkForceElbow(P){
     }    
     if(!P.drawn){ setStatus('Draw a card first.'); return; }
     state.phase='place'; state.subphase=null; computePlaceHighlights(); updateHUD();
+    // If we're in a forced-place state but *nothing* is legal for this card,
+    // waive the force so Bottom/End Turn become available.
+    if (state.forcePlace && (!state.highlight || state.highlight.length===0)) {
+      state.forcePlace = false;
+      updateHUD();
+    }
+    // Mirror waiver for elbow-specific forcing (only if holding an Elbow)
+    if (state.forceElbowFor === P.id && P.drawn === TrackCard.Elbow) {
+      if (!state.highlight || state.highlight.length === 0) {
+        state.forceElbowFor = null;
+        updateHUD();
+      }
+    }
     if (!state.highlight || state.highlight.length === 0){
       setStatus('No legal placement exists for this card. Use Bottom to cycle it without penalty.');
       toast('No legal placement for this card');
@@ -1369,14 +1568,23 @@ function checkForceElbow(P){
      P.drawUsed     = true;    // ← mark Draw as Used for this turn
      setStatus('No legal placement exists for that card — moved to bottom without penalty. Draw is now Used for this turn.');
    } else {
-     // --- NORMAL BOTTOM (with penalties) ---
-     P.drawLocked = true;
-     P.skipCount++;
-     if (bottomed === TrackCard.Elbow) {
-       P.elbowSkipCount++;
-       checkForceElbow(P);
-     }
-     setStatus('Bottomed. Drawing is locked until End Turn.');
+    // --- NORMAL BOTTOM (with penalties) ---
+    P.drawLocked = true;
+    // Only penalize if they truly did nothing meaningful this turn
+    const penalize = !(P.tokenUsed || P.rotatedThisTurn);
+    // And never penalize if this was an elbow-forced turn with *no* legal elbow
+    const forcedButImpossible =
+      (state.forceElbowFor === P.id) && !canPlaceElbowNow(P.id);
+    if (penalize && !forcedButImpossible) {
+      P.skipCount++;
+      if (bottomed === TrackCard.Elbow) {
+        P.elbowSkipCount = (P.elbowSkipCount|0) + 1;
+        checkForceElbow(P);                // ← elbow-only checker
+      }
+    }
+    // If we waived elbow force, clear it explicitly
+    if (forcedButImpossible) state.forceElbowFor = null;
+    setStatus('Bottomed. Drawing is locked until End Turn.');
    }
  
    state.phase='idle'; state.highlight=[]; state.hover=null;
@@ -1509,6 +1717,10 @@ function checkForceElbow(P){
 
     state.die=null; dieTag().textContent='Die: —'; btn('applyBtn').disabled = true;
     setStatus('Meshed rotation applied to '+rotated+' track cell(s).');
+    if (rotated > 0) {
+      const P = currentPlayer();
+      P.rotatedThisTurn = true;    // NEW
+    }    
     onTopologyChanged();
     render();
     maybeAutoAdvance();
@@ -1688,7 +1900,7 @@ function checkForceElbow(P){
           state.forcePlace = false;   // placing satisfies the force rule
           if (placedType === TrackCard.Elbow) {
             P.elbowSkipCount = 0;
-            P.forceElbow = false;
+            state.forceElbowFor = null;       // clear the elbow force after placing one
           }
           pulse(x,y);
           state.ghostRotAnim = null;  // clear any in-progress ghost tween
@@ -1769,6 +1981,20 @@ function checkForceElbow(P){
                 setStatus('Token moved.');
               }
         })();
+
+        // If that move completed 3/3 corners, auto-end the turn immediately.
+        if (playerHasFinished(currentPlayer())) {
+          const P = currentPlayer();
+          P.tokenUsed = true;                // consume the action
+          tokenTag().textContent='Token: Used';
+          btn('tokenBtn').disabled = true;
+          state.phase='idle'; state.subphase=null;
+          state.highlight=[]; state.tokenSelect=null;
+          render(); updateHUD();
+          setStatus(P.name + ' completed all three corners — auto-advancing turn…');
+          endTurn();
+          return; // stop; we just advanced the turn
+        }
 
         currentPlayer().tokenUsed = true; tokenTag().textContent='Token: Used'; btn('tokenBtn').disabled = true;
               state.phase='idle'; state.subphase=null; state.highlight=[]; state.tokenSelect=null; render(); updateHUD();
@@ -1909,6 +2135,24 @@ function checkForceElbow(P){
   }
 
   function updateHUD(){
+    if (state.phase === 'gameOver') {
+      const P = currentPlayer();
+      turnTag().textContent  = 'Turn: —';
+      phaseTag().textContent = 'Phase: gameOver';
+      drawnTag().textContent = 'Card: —';
+      drawTag().textContent  = 'Draw: —';
+      dieTag().textContent   = 'Die: —';
+      rollTag().textContent  = 'Roll: —';
+      tokenTag().textContent = 'Token: —';
+      // Disable all action buttons
+      ['drawBtn','placeBtn','bottomBtn','tokenBtn','rollBtn','applyBtn','endTurnBtn','undoGlobalBtn','redoGlobalBtn','undoTurnBtn','redoTurnBtn']
+        .forEach(id => { const b = document.getElementById(id); if (b) b.disabled = true; });
+      renderCornerScoreTable();
+      render();
+      updateUndoButtons();
+      return;
+    }
+
     renderCornerScoreTable();
 
     const P=currentPlayer();
@@ -1920,7 +2164,21 @@ function checkForceElbow(P){
         : (P.drawUsed
             ? 'Draw: Used'
             : (rotationsRemain ? 'Draw: Ready (Board Full: rotations available)'
-                               : 'Draw: Locked (Board Full)'));      setStatus('Dead-Straight Fix: replace ONE highlighted Straight with a Cross (free).');
+                               : 'Draw: Locked (Board Full)'));
+      // Keep Skipped tag accurate during deadFix (prevents stale "⚠" from older UI states)
+      (function(){
+        const el = document.getElementById('skippedTag');
+        if(!el) return;
+        const skipCount = (P && P.skipCount) ? P.skipCount : 0;
+        el.textContent = 'Skipped: ' + skipCount + '/3';
+        if (skipCount >= 3) {
+          el.classList.add('warn');
+          el.textContent += '  ⚠ Maximum skipped';
+        } else {
+          el.classList.remove('warn');
+        }
+      })();                               
+      setStatus('Dead-Straight Fix: replace ONE highlighted Straight with a Cross (free).');
       render();
       updateUndoButtons();
       return; // ← prevent later HUD paths from overwriting this status
@@ -1942,6 +2200,7 @@ function checkForceElbow(P){
       dieTag().textContent   = 'Die: ' + (state.die || '—');
       rollTag().textContent  = 'Roll: ' + (currentPlayer().rollUsed ? 'Used' : 'Ready');
       tokenTag().textContent = 'Token: ' + (currentPlayer().tokenUsed ? 'Used' : 'Ready');
+      drawnTag().textContent = 'Card: ' + (P.drawn || '—');   // ← keep the Card tag in sync
 
       // Score tag MUST keep updating even when board is full
       (function(){
@@ -1951,6 +2210,34 @@ function checkForceElbow(P){
         const reached = P.reached ? P.reached : new Set();
         const list = (reached && reached.size) ? Array.from(reached).map(n=>n[0]).join(', ') : '';
         el.textContent = 'Score: ' + (reached ? reached.size : 0) + '/3' + (list ? (' ['+list+']') : '');
+      })();
+
+      // Skipped tag MUST also refresh here (otherwise stale "⚠ Maximum skipped" can stick)
+      (function(){
+        const el = document.getElementById('skippedTag');
+        if(!el) return;
+        const skipCount = (P && P.skipCount) ? P.skipCount : 0;
+        el.textContent = 'Skipped: ' + skipCount + '/3';
+        if (skipCount >= 3) {
+          el.classList.add('warn');
+          el.textContent += '  ⚠ Maximum skipped';
+        } else {
+          el.classList.remove('warn');
+        }
+      })();
+
+      // Elbows Skipped tag also refreshes here
+      (function(){
+        const el = document.getElementById('elbowSkippedTag');
+        if(!el) return;
+        const ecount = (P && P.elbowSkipCount) ? P.elbowSkipCount : 0;
+        el.textContent = 'Elbows Skipped: ' + ecount + '/3';
+        if (ecount >= 3) {
+          el.classList.add('warn');
+          el.textContent += '  ⚠ Next Elbow must be placed';
+        } else {
+          el.classList.remove('warn');
+        }
       })();
 
       // Buttons: draw allowed only if rotations remain; place allowed only if holding RS/RE/RC
@@ -2019,11 +2306,21 @@ function checkForceElbow(P){
     btn('tokenBtn').disabled = !!P.tokenUsed;
     btn('rollBtn').disabled = !!P.rollUsed;
 
-    // If the player has hit the elbow threshold and is currently holding an Elbow, force placement:
-    if (P.forceElbow && P.drawn === TrackCard.Elbow) {
+    // Elbow force applies only when the forced player is current, holding an Elbow, and it can be placed.
+    const elbowForceApplies =
+      (state.forceElbowFor === P.id) &&
+      (P.drawn === TrackCard.Elbow) &&
+      canPlaceElbowNow(P.id);
+
+    // Waive elbow force here too if it turns out impossible right now
+    if (state.forceElbowFor === P.id && P.drawn === TrackCard.Elbow && !canPlaceElbowNow(P.id)) {
+      state.forceElbowFor = null;
+    }
+
+    if (elbowForceApplies) {
       btn('bottomBtn').disabled = true;
       endTurnBtn.disabled = true;
-      overrideBtn.style.display = 'none'; // no bypass for elbow forcing
+      overrideBtn.style.display = 'none';
       setStatus('Elbows Skipped: 3/3 — you must place this Elbow now.');
     }
 
@@ -2032,9 +2329,9 @@ function checkForceElbow(P){
       const el = document.getElementById('tokenCount');
       if (!el) return;
       const onBoard = countTokens(P.id);
-      const remaining = Math.max(0, TOKENS_MAX - ((P.tokensRemoved|0) + onBoard));
-      el.textContent = 'Token: ' + remaining + '/' + TOKENS_MAX; // shows tokens still available to place
-    })();
+      const placed = Math.max(0, Math.min(TOKENS_MAX, (P.tokensRemoved|0) + onBoard));
+      el.textContent = 'Token: ' + placed + '/' + TOKENS_MAX; // shows tokens placed so far
+    })();    
 
     (function(){
       const el = document.getElementById('skippedTag');
@@ -2049,7 +2346,11 @@ function checkForceElbow(P){
       } else {
         el.classList.remove('warn');
       }
-      // Enforce End Turn restriction when skipCount ≥ 3
+      // SAFETY: if force is active BUT the current card can’t be placed anywhere,
+      // auto-waive to prevent deadlocks (Bottom/End Turn become available).
+      if (state.forcePlace && P.drawn && !canPlaceDrawnNow(P.id)) {
+        state.forcePlace = false;
+      }
       if (state.forcePlace) {
         endTurnBtn.disabled = true;
         // overrideBtn.style.display = 'inline-block';

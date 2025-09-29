@@ -141,6 +141,45 @@ If you Bottom it, your Draw state is set to **Used** — you must wait for your 
 - When a player has **no tokens on the board** and has **removed all 3** (e.g., via scoring), they are **out** and their turns are **automatically skipped** thereafter.
 - The HUD’s “Token: X/3” now shows **tokens remaining to place** (`3 - (removed + on-board)`).
 
+### 10) Auto-end on 3/3 corners + Finished skip + Game Over (bold green)
+
+- The instant a player reaches their **third opponent corner (3/3)** during a token move, their **turn ends automatically** and advances to the next player.
+- A player who has already completed **3/3** is **auto-skipped** at the start of their turn (works after Load, too).
+- If **no active players remain**, the game enters **Game Over** state and shows  
+  **All players have finished — game over.** in **bold green**.
+
+### 11) Token counter now shows **placed** (not remaining)
+
+- HUD “Token: X/3” now displays **tokens placed so far**: `0/3 → 3/3` (instead of remaining).
+- Saves record a coherent `tokens` value (= placed), and **legacy loads** backfill counts from the board and `reached`.
+- Fixes the fresh-game case where placing the first token showed **2/3** instead of **1/3**.
+
+### 12) Build adjacency from a token’s connected network
+
+- Placement highlights now include **empty cells adjacent to any track that’s connected** to one of your tokens’ current track cells (not just immediate neighbors).
+- This enables legal placement on cells that are **two steps away** via connected straights from the token’s position (matches the attached repro).
+
+### 13) Elbows Skipped 3/3 → **force only if possible** (no deadlocks)
+
+- When a player reaches **Elbows Skipped: 3/3**, the **next drawn Elbow must be placed** **only if** there is **≥1 legal Elbow placement right now**.
+- If the drawn **Elbow** has **no legal placement**, the **force is automatically waived** for that card; **Bottom** is allowed **without penalty**, and **End Turn** remains enabled.
+- On successful Elbow placement: `elbowSkipCount` resets and the force clears.
+
+### 14) Deadlock-prevention waivers refined
+
+- After **Draw**: if the drawn card has **no legal placement**, the forced-place rule is **waived immediately**.
+- On entering **Place**: if **no highlights** exist, forced-place is **waived**.
+- In the **HUD** refresh: safety checks **re-waive** forced states if the card in hand can’t be placed, and also waive the general force when the player has **no card** and **Draw is locked** (avoids “can’t draw / can’t end turn” traps).
+
+### 15) Fair Bottoming: no skip penalty after meaningful action
+
+- **Bottom** no longer increments **Skipped** (or Elbows Skipped) if the player has already **applied a rotation** and/or **used a token action** this turn.
+- Keeps skip counts from inflating on turns where the player actually did something.
+
+### 16) Turn iteration & stack-safe Game Over guard
+
+- `startTurn()` now **iterates** to the next eligible player (no recursion) and detects **Game Over** when everyone is **finished/out**, preventing call-stack overflows on endgame.
+
 ## Developer Notes
 
 ### Undo/Redo config
