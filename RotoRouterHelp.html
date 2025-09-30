@@ -1,0 +1,142 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>RotoRouter — Game Rules & How-To</title>
+<style>
+  :root{ color-scheme: light dark; }
+  body{
+    margin:0;
+    font:14px/1.45 "Segoe UI", Roboto, Arial, sans-serif;
+    color:#111;
+    background:#f7f8fb;
+  }
+  /* Center the content column, keep text left-aligned */
+  .container{
+    max-width: 900px;          /* controls how “wide” the help page can get */
+    margin: 36px auto;         /* centers the column */
+    padding: 0 24px;           /* keeps it off the edges on small screens */
+    background:#fff;
+    border:1px solid #e5e8f0;
+    border-radius:16px;
+    box-shadow: 0 10px 26px rgba(0,0,0,0.06);
+    text-align: left;          /* ensure left-justified text */
+  }
+  h1{ font-size:28px; margin:20px 16px 6px; }
+  h2{ font-size:20px; margin:18px 16px 6px; color:#2b3a67; }
+  h3{ font-size:16px; margin:12px 16px 4px; color:#384766; }
+  p, ul, ol{ margin: 8px 16px; }
+  ul, ol{ padding-left: 22px; }
+  .tip{ font-size:13px; color:#555; margin: 6px 16px 14px; }
+  .note{ font-size:12px; color:#666; margin: 12px 16px 18px; }
+  .mono{ font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace; }
+  @media (prefers-color-scheme: dark){
+    body{ background:#0b0f18; color:#e6e6e6; }
+    .container{
+      background:#0d1220; border-color:#1f2636; box-shadow:none;
+    }
+    h2{ color:#b7c1ff; }
+    h3{ color:#c5cbe9; }
+    .tip{ color:#9da6b8; }
+    .note{ color:#8a93a8; }
+  }
+</style>
+</head>
+<body>
+  <main class="container">
+    <h1>RotoRouter — Quick How-To</h1>
+
+    <h2>Objective</h2>
+    <p>Be the first to <b>score 3 corners</b> by moving your tokens onto <i>three different opponents’ corner squares</i>.</p>
+    <ul>
+      <li>Each player has <b>3 tokens</b>.</li>
+      <li>When a token reaches an opponent’s corner, it <b>scores</b> and is <b>removed</b> from the board.</li>
+      <li>At <b>3/3</b> you’re finished and will be auto-skipped.</li>
+    </ul>
+
+    <h2>Setup</h2>
+    <ul>
+      <li>Choose board size: <b>7×7</b> or <b>9×9</b> (Main Menu).</li>
+      <li>Each player picks a <b>color</b> and a <b>name</b> (AI optional).</li>
+      <li>Start with no tokens on the board; your color’s corner is your <i>home corner</i>.</li>
+    </ul>
+
+    <h2>The Deck — Track Cards</h2>
+    <ul>
+      <li><b>Straight (─)</b> — 2 exits (East ↔ West)</li>
+      <li><b>Elbow (└)</b> — 2 exits (turn; base North ↔ East)</li>
+      <li><b>T (┴)</b> — 3 exits (base North, East, West; closed South)</li>
+      <li><b>Cross (┼)</b> — 4 exits (North, South, East, West)</li>
+    </ul>
+
+    <h2>The Deck — Rotation &amp; Replacement (Dual-Use)</h2>
+    <p>These cards can <b>act on existing tiles</b> <i>or</i> be <b>used to place new tracks</b> just like their normal counterparts.</p>
+    <ul>
+      <li><b>RS</b> — rotate an existing <b>Straight</b> <i>or</i> place a new <b>Straight</b></li>
+      <li><b>RE</b> — rotate an existing <b>Elbow</b> <i>or</i> place a new <b>Elbow</b></li>
+      <li><b>RT</b> — rotate an existing <b>T</b> <i>or</i> place a new <b>T</b></li>
+      <li><b>RC</b> — replace <i>any</i> existing tile with a <b>Cross</b> <i>or</i> place a new <b>Cross</b></li>
+    </ul>
+    <p class="tip"><i>Tip:</i> While a placement “ghost” is shown, use <b>Q</b>/<b>E</b> to rotate before confirming.</p>
+
+    <h2>Turn Flow</h2>
+    <ol>
+      <li><b>Draw</b> a card (if you don’t already hold one).</li>
+      <li><b>Play</b>:
+        <ul>
+          <li>Place a track (Straight/Elbow/T/Cross) in a legal empty cell, <i>or</i></li>
+          <li>Use <b>RS/RE/RT</b> to rotate a matching placed tile, <i>or</i> use <b>RC</b> to replace any tile with a Cross, <i>or</i></li>
+          <li>(Dual-use) play RS/RE/RT/RC as their <b>normal track</b> in an empty cell.</li>
+        </ul>
+      </li>
+      <li><b>Token Action</b> (optional): place a new token on your home corner (if empty &amp; connected) <i>or</i> move one token along connected tracks to any reachable empty cell.</li>
+      <li><b>End Turn</b>.</li>
+    </ol>
+    <p class="tip"><i>Forced play:</i> If a forced card has <b>no legal placement</b>, the force is <b>waived</b>; you may Bottom it.</p>
+
+    <h2>Legal Placement &amp; Connections</h2>
+    <h3>Track placement</h3>
+    <ul>
+      <li>Place only into an <b>empty</b> cell.</li>
+      <li>The cell must be <b>adjacent</b> (N/S/E/W) to at least one track connected to your network.</li>
+      <li>Touching sides must have <b>matching, reciprocal exits</b>.</li>
+    </ul>
+    <h3>Connected network</h3>
+    <ul>
+      <li>Tracks connect via continuous chains of matching exits.</li>
+      <li>Highlights show legal empty cells adjacent to your network.</li>
+    </ul>
+    <h3>Rotation / replacement</h3>
+    <ul>
+      <li><b>RS/RE/RT</b>: click matching tile → rotate with <b>Q/E</b> → click to confirm.</li>
+      <li><b>RC</b>: click any tile to make it a <b>Cross</b> (rotate before confirming if desired).</li>
+      <li>(Dual-use) You may also play these as new tracks of their base type.</li>
+    </ul>
+
+    <h2>Tokens &amp; Scoring</h2>
+    <ul>
+      <li><b>Place</b> a token on your home corner if empty &amp; connected.</li>
+      <li><b>Move</b> a token along connected paths to any reachable empty cell (one move per turn).</li>
+      <li><b>Score</b> by ending on an opponent’s corner; remove the moving token from the board.</li>
+      <li>On <b>3/3</b>, your turn ends immediately; you’re auto-skipped thereafter.</li>
+    </ul>
+
+    <h2>Bottoming (Recycle)</h2>
+    <p><b>Bottoming</b> moves the held card to the <b>bottom of your personal draw pile</b> (recycled, not discarded).</p>
+    <ul>
+      <li>If the card has <b>no legal placement</b>, you may Bottom it <b>with no penalty</b>.</li>
+      <li>If it <b>does</b> have a legal placement and you Bottom it, it counts as a <b>skip</b> (shown in HUD).</li>
+      <li>The card will return later as your deck cycles.</li>
+    </ul>
+
+    <h2>Ending the Game</h2>
+    <ul>
+      <li>When all remaining players are finished/out: <b style="color:#28a745;">All players have finished — game over.</b></li>
+      <li><b>Winner:</b> first to reach 3/3 scored corners; ties break by earliest to 3/3.</li>
+    </ul>
+
+    <p class="note"><i>Edge cases:</i> forced cards with zero legal placements are waived; HUD shows the actual token count and flags mismatches with a small warning.</p>
+  </main>
+</body>
+</html>

@@ -84,6 +84,7 @@
     </div>
 
     <div class="btnbar">
+      <button id="btnHelp"  type="button">Help</button>
       <button id="btnCancel" type="button">Cancel</button>
       <button id="btnStart"  type="button">Start Game</button>
     </div>
@@ -138,6 +139,9 @@
     .forEach(id => { const el=$(id); if (el) el.addEventListener('input', persistSetup); });
 
   // ---- buttons (still work) ----
+  $('btnHelp').addEventListener('click', ()=>{
+    window.open('RotoRouterHelp.html', '_blank', 'noopener');
+  });
   $('btnStart').addEventListener('click', startGame);
   $('btnCancel').addEventListener('click', ()=>{ /* stay here */ });
 
