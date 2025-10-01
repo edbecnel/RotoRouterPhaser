@@ -94,7 +94,12 @@
       <li><b>End Turn</b>.</li>
     </ol>
     <p class="tip"><i>Forced play:</i> If a forced card has <b>no legal placement</b>, the force is <b>waived</b>; you may Bottom it.</p>
-
+    <h2>Forced Play Rules</h2>
+    <ul>
+      <li><b>3 Skipped Tracks:</b> If you skip 3 track cards in a row, on your <b>next turn</b> you must <b>Draw and Place</b> the card drawn (if there is a legal placement). Bottom and End Turn are disabled until you place it.</li>
+      <li><b>3 Skipped Elbows:</b> If you skip 3 Elbows, the <b>next Elbow you draw must be placed</b> immediately (if there is a legal placement). Bottom and End Turn are disabled until the Elbow is placed.</li>
+      <li>If the forced card has <b>no legal placement</b>, the force is <b>waived</b> to avoid deadlocks — you may Bottom it and end your turn normally.</li>
+    </ul>    
     <h2>Legal Placement &amp; Connections</h2>
     <h3>Track placement</h3>
     <ul>
@@ -135,7 +140,10 @@
       <li>When all remaining players are finished/out: <b style="color:#28a745;">All players have finished — game over.</b></li>
       <li><b>Winner:</b> first to reach 3/3 scored corners; ties break by earliest to 3/3.</li>
     </ul>
-
+    <h2>Dead-Straight Fix</h2>
+    <p>If a Straight track becomes completely trapped by perpendicular Straights (cannot extend), it is highlighted. At the <b>start of your turn</b> you may replace one such Straight with a <b>Cross</b> for free. Tokens on the cell remain.</p>
+    <h2>Corner Fix</h2>
+    <p>If your own home corner becomes sealed by perpendicular Straights, you must replace that corner with a <b>Cross</b> before continuing play. A red HUD warning will guide you until the fix is made.</p>
     <p class="note"><i>Edge cases:</i> forced cards with zero legal placements are waived; HUD shows the actual token count and flags mismatches with a small warning.</p>
   </main>
 </body>

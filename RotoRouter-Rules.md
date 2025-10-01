@@ -53,7 +53,11 @@ _Tip:_ while a placement “ghost” is shown, use **Q/E** to rotate before conf
    - **Move** one of your tokens along connected tracks to any reachable empty cell.
 4. **End Turn**.
 
-_Forced play:_ If you skip too often, the UI may require a specific card. If that card has **no legal placement**, the force is **waived**; you may Bottom it and end the turn.
+## Forced Play Rules
+
+- **3 Skipped Tracks**: If you skip 3 track cards in a row, on your **next turn** you must **Draw and Place** the card drawn (if legal). Bottom and End Turn are disabled until you place it.
+- **3 Skipped Elbows**: If you skip 3 Elbows, the **next Elbow drawn must be placed** immediately (if legal). Bottom and End Turn are disabled until the Elbow is placed.
+- If a forced card has **no legal placement**, the force is **waived** — you may Bottom it and end your turn normally.
 
 ---
 
@@ -94,6 +98,26 @@ _Forced play:_ If you skip too often, the UI may require a specific card. If tha
 - If the held card has **no legal placement**, you may **Bottom** it **with no penalty**.
 - If the card **does** have a legal placement and you Bottom it anyway, it counts as a **skip** (shown in HUD).
 - A bottomed card **returns later** when it cycles back up.
+
+---
+
+## Dead-Straight Fix
+
+If a Straight track becomes completely trapped by perpendicular Straights (cannot extend):
+
+- At the **start of your turn**, such cells are highlighted.
+- You may replace **one** trapped Straight with a **Cross** for free.
+- Tokens on that cell remain in place.
+
+---
+
+## Corner Fix
+
+If your own home corner is sealed by perpendicular Straights:
+
+- At the **start of your turn**, the corner is highlighted.
+- You must replace it with a **Cross** before taking other actions.
+- A red HUD warning appears until the fix is made.
 
 ---
 

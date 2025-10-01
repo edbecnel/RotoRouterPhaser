@@ -1,6 +1,6 @@
 # RotoRouter — No-Block Edition
 
-+**Build:** 2025-09-27
++**Build:** 2025-10-01
 
 +This build includes **Save/Load**, the **Board Fully Tracked** lock, the **Dead-Straight Fix** rule, the **Undo/Redo system**, a unified history fix-phase handler, and the new **SVG Gear Mesh** enhancement (with animated rotations synced to track rotations). It also adds updated **token movement rules**, a **no-legal-placement bottom** path (no penalty, but only once per turn), and **player elimination / turn skip** once a player is out of tokens.
 
@@ -245,8 +245,46 @@ If you Bottom it, your Draw state is set to **Used** — you must wait for your 
 
 ### 27) HUD token counter (actual placed + mismatch hint)
 
-- “**Token: X/3**” displays **actual placed** only.
-- If `actualPlaced < (reached.size + onBoard)`, the HUD adds a subtle **⚠** and tooltip explaining the mismatch (does not affect rules).
+### 28) Elbows Skipped 3/3 — Forced Placement
+
+- When a player has skipped **3 Elbows**, the **next Elbow drawn must be placed** if a legal placement exists.
+- While this rule is active:
+  - **Bottom** button is disabled.
+  - **End Turn** button is disabled.
+  - Status shows: _“Elbows Skipped: 3/3 ⚠. This elbow must be now be placed”_.
+- If no legal placement exists for that Elbow, the force is waived automatically to prevent deadlocks (the Elbow may be Bottomed without penalty).
+- On successful Elbow placement, the counter resets and normal play resumes.
+
+### 29) 3 Skipped Track Cards — Force on Next Turn
+
+- After a player skips **3 track cards** (not limited to Elbows), they are forced to **Draw and Place** on their **next turn**.
+- **Bottom** and **End Turn** are disabled until the forced card is placed.
+- If no legal placement exists for the drawn card, the force is waived automatically.
+- Consistent with the Elbow skip behavior, ensuring both rules work uniformly.
+
+### 30) Dead-Straight Fix Refinement
+
+- Trapped Straights are detected only when surrounded by **perpendicular Straights**:
+  - Inner cell: all 4 orthogonal neighbors are perpendicular Straights.
+  - Border cell: 3 neighbors, all perpendicular.
+  - Corner cell: never qualifies.
+- At the start of a turn, any trapped Straight may be replaced (free) with a Cross.
+- Tokens remain in place during the replacement.
+- Undo/Redo and Load resume Dead-Straight Fix prompts correctly.
+
+### 31) Corner Fix Enforcement
+
+- Detects when a player’s **own corner** is sealed by perpendicular Straights.
+- The corner must be replaced with a Cross (free) before normal actions continue.
+- HUD displays a persistent red warning during this fix phase.
+- Integrated with Undo/Redo and Save/Load — the fix prompt reappears when needed.
+
+### 32) HUD / Button State Consistency
+
+- **End Turn** and **Bottom** are now disabled in all forced-placement cases (Elbow skips, 3 skips).
+- Sidebar tags (`Skipped`, `Elbows Skipped`) update dynamically as conditions change.
+- Warnings are displayed consistently in red with the ⚠ symbol.
+- Prevents situations where buttons were active but only blocked by a toast message.
 
 ---
 

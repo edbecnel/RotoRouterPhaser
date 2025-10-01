@@ -313,7 +313,8 @@ function loadSetupFromStorage(){
     redo:    [],        // Global redo stack
     turnHistory: [],    // Per-turn undo stack (current player's turn)
     turnRedo:   [],      // Per-turn redo stack
-    forceElbowFor: null  // If set to a player id, that player must place an Elbow this turn (but only if placement is possible)
+    forceElbowFor: null, // If set to a player id, that player must place an Elbow this turn (but only if placement is possible)
+    _enforceForcePlaceWindow: false  // gate: only true during startTurn() check
   };
   
 
@@ -511,6 +512,7 @@ function loadSetupFromStorage(){
       skipCount: p.skipCount|0,
       elbowSkipCount: p.elbowSkipCount|0,
       forceElbow: !!p.forceElbow,
+      forcePlaceNext: !!p.forcePlaceNext,
       reached: p.reached ? Array.from(p.reached) : [], // names of corners reached
     }));
 
@@ -641,6 +643,7 @@ function loadSetupFromStorage(){
         skipCount: from.skipCount|0,
         elbowSkipCount: from.elbowSkipCount|0,
         forceElbow: !!from.forceElbow,
+        forcePlaceNext: !!from.forcePlaceNext,
         reached: new Set(from.reached || []),
       };
     });
@@ -992,11 +995,14 @@ function cornerFor(pid){
 
   // Game flow
   function newGame(){
-    state.N = parseInt(UI.boardSize().value,10);
-    state.N = parseInt((state.setup?.boardSize ?? UI.boardSize().value ?? 9), 10);
-    state.board = makeBoard(state.N);
+  // Use the in-game dropdown as the source of truth.
+  const uiSize = parseInt(UI.boardSize().value, 10) || 9;
+  state.N = uiSize;
+  // Keep the saved setup aligned with the in-game choice (so Main Menu and reloads match).
+  state.setup = state.setup || {};
+  state.setup.boardSize = uiSize;
+  try { localStorage.setItem('rr.setup', JSON.stringify(state.setup)); } catch {}    state.board = makeBoard(state.N);
     initGearOffsets(state.N); // <- add this
-    // state.players = PLAYERS.map(p=>({...p, deck:makeDeck(state.N), drawn:null, tokens:0, tokensRemoved:0, drawLocked:false, drawUsed:false, tokenUsed:false, rollUsed:false, skipCount: 0, elbowSkipCount: 0, forceElbow: false }));
     state.players = PLAYERS.map(p=>{
       const cfg = (state.setup?.players && state.setup.players[p.id]) || { name:p.name, ai:false };
       return {
@@ -1008,7 +1014,7 @@ function cornerFor(pid){
         deck: makeDeck(state.N),
         drawn:null, tokens:0, tokensRemoved:0,
         drawLocked:false, drawUsed:false, tokenUsed:false, rollUsed:false,
-        skipCount: 0, elbowSkipCount: 0, forceElbow: false
+        skipCount: 0, elbowSkipCount: 0, forceElbow: false, forcePlaceNext: false
       };
     });    
     state.cornerLockTurns = PLAYERS.map(() => 0);
@@ -1067,7 +1073,15 @@ function cornerFor(pid){
     P.rotatedThisTurn = false;  // track meaningful board action
     state.deadFixDoneThisTurn = false;
     state.phase='idle'; state.subphase=null; state.highlight=[]; state.hover=null; state.previewRot=0; state.die=null; state.tokenSelect=null; state.rotateFocus=null;
-    checkForcePlace();
+    // Open a short window where "force next turn" can activate
+    state._enforceForcePlaceWindow = true;
+    checkForcePlace();    
+    // If we're entering a forced draw+place window, consume the arming flag now.
+    if (state.forcePlace && currentPlayer().forcePlaceNext) {
+      currentPlayer().forcePlaceNext = false;
+    }
+    // Close the window so mid-turn calls won’t trigger the force
+    state._enforceForcePlaceWindow = false;
     // Ensure counter exists on first load (startTurn runs before newGame)
     if (!state.cornerLockTurns) state.cornerLockTurns = PLAYERS.map(()=>0);    
 
@@ -1114,6 +1128,9 @@ function cornerFor(pid){
     const endingP = state.players[state.current];
     if (endingP.drawn && isTrackCard(endingP.drawn)) {
       endingP.skipCount++;
+      if (endingP.skipCount >= 3) {
+        endingP.forcePlaceNext = true;  // enforce on their NEXT turn
+      }      
     }
 
     // If they are holding an Elbow, count an elbow-skip too
@@ -1132,6 +1149,18 @@ function cornerFor(pid){
   }
 
   function endTurn(){
+    // Block ending the turn if an Elbow is being forced and can be placed now.
+    const P = currentPlayer();
+    if ((state.forceElbowFor === P.id) && (P.drawn === TrackCard.Elbow) && canPlaceElbowNow(P.id)) {
+      setStatus('Elbows Skipped: 3/3 ⚠. This elbow must be now be placed');
+      toast('Forced Elbow: End Turn disabled');
+      return;
+    }    
+    if (state.forcePlace) {
+      setStatus('Maximum track cards skipped — you must place a legal track before ending your turn.');
+      toast('Forced placement: End Turn disabled');
+      return;
+    }    
     if(state.turnAdvancing) return;
     state.turnAdvancing=true;
     setTimeout(endTurnImmediate, 120);
@@ -1170,12 +1199,21 @@ function cornerFor(pid){
         updateHUD();
       }
     }
+    // If player is over the elbow-skip threshold and just drew an Elbow
+    // that can be placed now, activate the force immediately.
+    if ((P.elbowSkipCount|0) >= 3 && P.drawn === TrackCard.Elbow && canPlaceElbowNow(P.id)) {
+      state.forceElbowFor = P.id;
+    }
 
     // While forced, we don't mark Draw as "Used" so the button stays enabled until a placement happens.
-    P.drawUsed = state.forcePlace ? false : true;    
+    P.drawUsed = state.forcePlace ? false : true;
+    const elbowForceNow =
+      (state.forceElbowFor === P.id) &&
+      (P.drawn === TrackCard.Elbow) &&
+      canPlaceElbowNow(P.id);
     updateHUD();
-    if (P.forceElbow && P.drawn === TrackCard.Elbow) {
-      setStatus('Elbows Skipped reached 3/3 — you must place this Elbow now.');
+    if (elbowForceNow) {
+      setStatus('Elbows Skipped: 3/3 ⚠. This elbow must be now be placed');
     } else {
       setStatus(`${P.name} drew ${P.drawn}. Click Place.`);
     }
@@ -1436,15 +1474,28 @@ function computePlaceHighlights(){
     });
   }
 
-  // If this is truly the first placement AND there are no RS/RE/RC or adjacency options,
-  // restrict to the player's own corner; otherwise show whatever we gathered above.
-  if (myOwned.length===0 && myTokens.length===0 && net.length===0 && adj.size===0){
-    const c = cornerFor(pid);
-    const cell = state.board[c.y][c.x];
-    state.highlight = (!cell.track && !cell.token) ? [c] : [];
-  } else {
-    state.highlight = Array.from(adj.values());
+  // If this is truly the first placement and the only things in `adj` are rotation targets
+  // (i.e., there are NO empty cells to place on), also allow placing on your own empty corner.
+  const firstPlacement = (myOwned.length===0 && myTokens.length===0 && net.length===0);
+
+  // Do we already have at least one EMPTY target in adj?
+  let hasEmptyAdj = false;
+  for (const v of adj.values()){
+    const cc = state.board[v.y][v.x];
+    if (!cc.track && cc.token==null) { hasEmptyAdj = true; break; }
   }
+
+  if (firstPlacement && !hasEmptyAdj){
+    const co = cornerFor(pid);
+    const cCell = state.board[co.y][co.x];
+    if (!cCell.track && cCell.token==null){
+      // Add the player's own corner as a legal placement (in addition to rotate targets)
+      adj.set(co.x+','+co.y, {x:co.x, y:co.y});
+    }
+  }
+
+  // Finalize highlights
+  state.highlight = Array.from(adj.values());
 }
 
 // Returns true if the current player's *currently drawn card* has at least one legal
@@ -1548,22 +1599,28 @@ function hasRotationInDeck(P){
 }
 
 function checkForcePlace(){
-  // === FORCE-DRAW RULE (anchor: RR_FORCE_DRAW) ===
   const P = currentPlayer();
-  state.forcePlace = (!state.boardSaturated) && (P.skipCount >= 3);
-  // If forced and no card in hand, allow drawing even if bottom locked
-  if (state.forcePlace && !P.drawn) {
-    P.drawLocked = false;   // unloack Draw
-    P.drawUsed   = false;   // ← keep Draw "Ready" (not "Used")
+
+  // 1) Activate ONLY at start of the player's NEXT turn (window set in startTurn()).
+  if (!state.forcePlace) {
+    const shouldActivate =
+      (!!state._enforceForcePlaceWindow) &&
+      (!state.boardSaturated) &&
+      (!!P.forcePlaceNext);
+    if (shouldActivate) {
+      state.forcePlace = true;             // becomes sticky for this turn
+      if (!P.drawn) {                      // allow/require a draw
+        P.drawLocked = false;
+        P.drawUsed   = false;
+      }
+    }
   }
-  // If the player *does* have a card but it has ZERO legal placements,
-  // waive the force rule to avoid deadlocks.
+
+  // 2) While forced, if they DO hold a card but it has ZERO legal placements,
+  //    waive the force to avoid deadlocks (lets Bottom/end turn).
   if (state.forcePlace && P.drawn && !canPlaceDrawnNow(P.id)) {
     state.forcePlace = false;
-    // Make sure UI doesn't mislead: allow Bottom (no penalty path will apply),
-    // and keep Draw usable after they bottom.
-    // (No status override here; bottomCard() will message appropriately.)
-  }  
+  }
 }
 
 function checkForceElbow(P){
@@ -1608,7 +1665,21 @@ function checkForceElbow(P){
 
  function bottomCard(){
   const P=currentPlayer();
-   if(!P.drawn){ setStatus('Nothing to bottom.'); return; }
+  // If max-skips is forcing a placement and the drawn card CAN be placed somewhere,
+  // Bottom is not allowed this turn.
+  if (state.forcePlace && P.drawn && canPlaceDrawnNow(P.id)) {
+    setStatus('Maximum track cards skipped — you must PLACE your drawn track before ending your turn.');
+    toast('Forced placement: Bottom is disabled');
+    return;
+  }  
+  // Block Bottom if this player is forced to place an Elbow and it is placeable now.
+  if ((state.forceElbowFor === P.id) && (P.drawn === TrackCard.Elbow) && canPlaceElbowNow(P.id)) {
+    setStatus('Elbows Skipped: 3/3 ⚠. This elbow must be now be placed');
+    toast('Forced Elbow: Bottom is disabled');
+    return;
+  }
+
+  if(!P.drawn){ setStatus('Nothing to bottom.'); return; }
    // Check if this card has *no* legal placement anywhere on the board.
    // On a full board, normal tracks have no legal placements; RS/RE/RC may still be placeable.
    const noPlace = !canPlaceDrawnNow(P.id);
@@ -1633,6 +1704,9 @@ function checkForceElbow(P){
       (state.forceElbowFor === P.id) && !canPlaceElbowNow(P.id);
     if (penalize && !forcedButImpossible) {
       P.skipCount++;
+      if (P.skipCount >= 3) {
+        P.forcePlaceNext = true;   // do NOT force mid-turn; enforce next turn
+      }      
       if (bottomed === TrackCard.Elbow) {
         P.elbowSkipCount = (P.elbowSkipCount|0) + 1;
         checkForceElbow(P);                // ← elbow-only checker
@@ -2256,6 +2330,10 @@ function checkForceElbow(P){
 
     if (state.boardSaturated){
       const P = currentPlayer();
+      const elbowForceNow =
+        (state.forceElbowFor === P.id) &&
+        (P.drawn === TrackCard.Elbow) &&
+        canPlaceElbowNow(P.id);      
       const rotationsRemain = hasRotationInDeck(P);
       const holdingRotation = isRotationCard(P.drawn);
 
@@ -2304,24 +2382,29 @@ function checkForceElbow(P){
         el.textContent = 'Elbows Skipped: ' + ecount + '/3';
         if (ecount >= 3) {
           el.classList.add('warn');
-          el.textContent += '  ⚠ Next Elbow must be placed';
+          el.textContent += elbowForceNow
+            ? '  ⚠. This elbow must be now be placed'
+            : '  ⚠ Next Elbow must be placed';
         } else {
           el.classList.remove('warn');
         }
       })();
-
       // Buttons: draw allowed only if rotations remain; place allowed only if holding RS/RE/RC
       const forcedOK = state.forcePlace && !P.drawn; // unchanged forced-draw semantics
       btn('drawBtn').disabled   = !!P.drawn || P.drawUsed || ((!rotationsRemain) && !forcedOK);
       btn('placeBtn').disabled  = !P.drawn || !holdingRotation;   // only RS/RE/RC can act on full board
-      // Bottom: allowed; if no legal placement (e.g., holding normal track), it will be no-penalty
-      btn('bottomBtn').disabled = !P.drawn || state.forcePlace;
+      // Bottom blocked while elbow is being forced and placeable
+      btn('bottomBtn').disabled = !P.drawn || state.forcePlace || elbowForceNow;
 
-      endTurnBtn.disabled = false;
+      // End Turn blocked while elbow is being forced and placeable
+      endTurnBtn.disabled = !!elbowForceNow;
       overrideBtn.style.display = 'none';
       btn('tokenBtn').disabled = !!currentPlayer().tokenUsed;
       btn('rollBtn').disabled  = !!currentPlayer().rollUsed;
       btn('applyBtn').disabled = !(state.die && state.die!=='X');
+      if (elbowForceNow) {
+        setStatus('Elbows Skipped: 3/3 ⚠. This elbow must be now be placed');
+      }      
 
       render();
       updateUndoButtons();
@@ -2376,6 +2459,11 @@ function checkForceElbow(P){
     btn('tokenBtn').disabled = !!P.tokenUsed;
     btn('rollBtn').disabled = !!P.rollUsed;
 
+    // Arm elbow force here as well if threshold reached and a placeable Elbow is in hand.
+    if ((P.elbowSkipCount|0) >= 3 && P.drawn === TrackCard.Elbow && canPlaceElbowNow(P.id)) {
+      state.forceElbowFor = P.id;
+    }    
+
     // Elbow force applies only when the forced player is current, holding an Elbow, and it can be placed.
     const elbowForceApplies =
       (state.forceElbowFor === P.id) &&
@@ -2391,7 +2479,7 @@ function checkForceElbow(P){
       btn('bottomBtn').disabled = true;
       endTurnBtn.disabled = true;
       overrideBtn.style.display = 'none';
-      setStatus('Elbows Skipped: 3/3 — you must place this Elbow now.');
+      setStatus('Elbows Skipped: 3/3 ⚠. This elbow must be now be placed');
     }
 
     tokenTag().textContent = 'Token: ' + (P.tokenUsed ? 'Used' : 'Ready');
@@ -2459,7 +2547,10 @@ function checkForceElbow(P){
           setStatus('Maximum track cards skipped — you must Place your drawn track (or use Override).');
         }
       } else {
-        endTurnBtn.disabled = false;
+        // Do NOT re-enable End Turn if a forced Elbow is in hand and placeable.
+        if (!elbowForceApplies) {
+          endTurnBtn.disabled = false;
+        }
         overrideBtn.style.display = 'none';
       }
     })();
@@ -2472,7 +2563,9 @@ function checkForceElbow(P){
       el.textContent = 'Elbows Skipped: ' + ecount + '/3';
       if (ecount >= 3) {
         el.classList.add('warn');
-        el.textContent += '  ⚠ Next Elbow must be placed';
+        el.textContent += elbowForceApplies
+          ? '  ⚠. This elbow must be now be placed'
+          : '  ⚠ Next Elbow must be placed';
       } else {
         el.classList.remove('warn');
       }
@@ -2685,16 +2778,6 @@ function checkForceElbow(P){
     }
     ctx.restore();
   }
-
-  // function drawGear(x,y){
-  //   const cell=state.cell;
-  //   const cx=x*cell+cell/2, cy=y*cell+cell/2;
-  //   ctx.strokeStyle=COLORS.grid; ctx.lineWidth=1; ctx.strokeRect(x*cell, y*cell, cell, cell);
-  //   ctx.strokeStyle=COLORS.grid; ctx.lineWidth=2;
-  //   ctx.beginPath(); ctx.arc(cx, cy, cell/2-4, 0, Math.PI*2); ctx.stroke();
-  //   ctx.fillStyle='#202a3d';
-  //   ctx.beginPath(); ctx.arc(cx, cy, cell/2-7, 0, Math.PI*2); ctx.fill();
-  // }
 
   // Draw a background gear from the external SVG.
   // Alternates orientation by cell parity: even -> 0°, odd -> 90°.
