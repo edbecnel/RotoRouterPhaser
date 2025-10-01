@@ -84,7 +84,7 @@ _Tip:_ while a placement “ghost” is shown, use **Q/E** to rotate before conf
 
 ## Tokens & Scoring
 
-- **Place** a token: onto your **home corner** if it’s empty and connected.
+- **Place** a token: onto your **home corner** if a track is present on that corner.
 - **Move** a token: along connected paths to any reachable empty cell (one move per turn).
 - **Score**: end a move on an **opponent’s corner** → score that corner; the moving token is **removed from the board**.
 - **Finish**: upon **3/3** scored corners, your turn ends immediately and you are auto-skipped thereafter.
