@@ -305,6 +305,11 @@ If you Bottom it, your Draw state is set to **Used** — you must wait for your 
   - **Rotate-existing commits** (RS/RE/RT).
 - Prevents “half-rotated” tracks and ensures consistent appearance.
 
+### 35) Gear artwork update
+
+- Background gear asset switched to **gear-grayblue-03.svg**.
+- Added a small cache-buster on load to avoid stale art after updates.
+
 ---
 
 ## Updated Deck (with T/RT) — supersedes older counts

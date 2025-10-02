@@ -223,7 +223,7 @@ function loadSetupFromStorage(){
   if ('decoding' in gearImg) gearImg.decoding = 'sync';
   gearImg.onload = () => { gearReady = true; render(); };
   gearImg.onerror = () => { console.warn('Could not load gear SVG:', GEAR_SRC); };
-  gearImg.src = GEAR_SRC;
+  gearImg.src = `${GEAR_SRC}?v=2025-10-02`;
   // How tightly the gear outer diameter should fit the cell (1.00 = full cell)
   // For tight teeth meshing, keep at 1.00. If you want a tiny gap, try 0.98.
   const GEAR_OUTER_FIT = 1.00;   // -> try 0.98 if you prefer a hairline gap
@@ -2864,8 +2864,8 @@ function checkForceElbow(P){
     const targetOuter = cell * GEAR_OUTER_FIT;
 
     // Scale uniformly based on the smaller natural dimension of the SVG
-    const natW = gearImg.naturalWidth;
-    const natH = gearImg.naturalHeight;
+    const natW = gearImg.naturalWidth  || 512;
+    const natH = gearImg.naturalHeight || 512;
     const natMin = Math.min(natW, natH);
     const k = targetOuter / natMin;
 
