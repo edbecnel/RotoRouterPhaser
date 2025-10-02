@@ -286,6 +286,25 @@ If you Bottom it, your Draw state is set to **Used** — you must wait for your 
 - Warnings are displayed consistently in red with the ⚠ symbol.
 - Prevents situations where buttons were active but only blocked by a toast message.
 
+### 33) Rotation Animation Timing (Unified Constants)
+
+- Added two top-level constants to control animation speeds:
+  - **`RR_APPLY_TWEEN_MS`** — duration (ms) for full-board Apply rotations (tiles + gears).
+  - **`PREVIEW_ROT_TWEEN_MS`** — duration (ms) for Q/E ghost preview rotations during placement.
+- All Apply tweens (tiles + gear pulses) now reference `RR_APPLY_TWEEN_MS`, so adjusting one knob changes the whole animation.
+- The quick preview spin remains controlled by `PREVIEW_ROT_TWEEN_MS`.
+
+### 34) Safe Placement During Ghost Rotation
+
+- Fixed bug where clicking while a Q/E rotation animation was still in progress could place a track at a **non-orthogonal angle**.
+- New behavior:
+  - If a click occurs during a ghost tween, the action is **queued** until the animation completes.
+  - The placement then snaps to the tween’s exact 90° destination angle, guaranteeing orthogonal alignment.
+- This applies both to:
+  - **New placements** (placing on an empty cell), and
+  - **Rotate-existing commits** (RS/RE/RT).
+- Prevents “half-rotated” tracks and ensures consistent appearance.
+
 ---
 
 ## Updated Deck (with T/RT) — supersedes older counts

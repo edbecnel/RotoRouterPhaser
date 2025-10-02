@@ -204,6 +204,9 @@ function loadSetupFromStorage(){
     RStraight:'RS', RElbow:'RE', RCross:'RC', RT:'RT'
   };
   const DIE_FACES=['X','X','X','CW90','CW90','CCW90','CCW90','DEG180'];
+  // === Animation timing knobs ===
+  const RR_APPLY_TWEEN_MS = 650;    // duration for the big "Apply" rotation tween (tiles + gears)
+  const PREVIEW_ROT_TWEEN_MS = 400; // duration for RR keys initiated track placement ghost preview rotation
   const TOKENS_MAX=3;
   const PLAYERS=[
     { id:0, name:'Red', color: COLORS.tokenR, pocket:'NW' },
@@ -1824,8 +1827,7 @@ function checkForceElbow(P){
     if(!state.die || state.die==='X') return;
     pushHistory('Apply Rotation');
     const base = thetaFor(state.die);
-    const APPLY_DUR = 650;                // keep in one place so tiles & gears match
-    startGearSpinPulse(base, APPLY_DUR);  // spin gears only during this Apply tween
+    startGearSpinPulse(base, RR_APPLY_TWEEN_MS);  // spin gears only during this Apply tween
 
     let rotated=0;
     for(let y=0;y<state.N;y++){
@@ -1843,7 +1845,7 @@ function checkForceElbow(P){
       if(!cell.track || cell.track==='Block') continue;
       const fromRot = cell.rot;
       const toRot   = mod360(cell.rot + sign*base);
-      startRotateAnim(x,y, fromRot, toRot, APPLY_DUR);
+      startRotateAnim(x,y, fromRot, toRot, RR_APPLY_TWEEN_MS);
       cell.rot = toRot; // commit; tween overlays visually
       rotated++;
       }
@@ -1962,7 +1964,65 @@ function checkForceElbow(P){
     if(state.phase==='place')
     {
       const P=currentPlayer(); 
-      const cell=state.board[y][x];      
+      const cell=state.board[y][x];
+
+      // If a ghost rotation tween is running (from Q/E), queue this click
+      // and execute it AFTER the tween lands on the exact 90° angle.
+      if (state.ghostRotAnim) {
+        const wasRotateCommit =
+          (state.subphase==='rotateExisting' &&
+          state.rotateFocus &&
+          state.rotateFocus.x===x &&
+          state.rotateFocus.y===y);
+
+        const legal = wasRotateCommit || state.highlight.some(h=>h.x===x&&h.y===y);
+        if (!legal) { toast('Not a legal cell'); return; }
+
+        const finalTo = state.ghostRotAnim.to; // the tween's target angle (a clean multiple of 90)
+        waitForGhostThen(()=>{
+          // Snap preview to the tween’s landed angle and perform the same action as if clicked now
+          state.previewRot = ((finalTo % 360) + 360) % 360;
+
+          // Re-enter the same logic paths below, but without the early return.
+          if (wasRotateCommit) {
+            // === RS/RE rotateExisting COMMIT (same as original commit block) ===
+            const toRot = state.previewRot;
+            cell.rot = toRot;
+            P.deck.discard.push(P.drawn); P.drawn = null;
+            P.skipCount = 0;
+            state.forcePlace = false;
+            state.subphase = null; state.rotateFocus = null; state.previewRot = 0;
+            pulse(x,y);
+            state.phase='idle'; state.highlight=[]; state.hover=null;
+            onTopologyChanged();
+            render(); updateHUD(); setStatus('Rotation applied.'); maybeAutoAdvance();
+          } else {
+            // === Normal placement path (same as original “place track” block) ===
+            if (cell.track){ toast('Cell occupied'); return; }
+            if(state.rotateFocus){
+              const rf=state.rotateFocus; const cc=state.board[rf.y][rf.x];
+              cc.rot=rf.original; state.rotateFocus=null; state.subphase=null;
+            }
+            const placedType = baseDrawnType(P.drawn);
+            pushHistory('Place/Replace');
+            cell.track=placedType; cell.rot=state.previewRot; cell.owner=P.id;
+            P.deck.discard.push(P.drawn); P.drawn=null;
+            P.skipCount = 0;
+            state.forcePlace = false;
+            if (placedType === TrackCard.Elbow) {
+              P.elbowSkipCount = 0;
+              state.forceElbowFor = null;
+            }
+            pulse(x,y);
+            state.ghostRotAnim = null;
+            state.phase='idle'; state.highlight=[]; state.hover=null;
+            onTopologyChanged(); updateHUD();
+            setStatus('Placed. You cannot draw again this turn.');
+            maybeAutoAdvance();
+          }
+        });
+        return; // stop now; the queued action above will run after the tween finishes
+      }
 
       // RS/RE: COMMIT rotation FIRST if we're clicking the selected tile
       if (state.subphase==='rotateExisting'
@@ -2170,7 +2230,7 @@ function checkForceElbow(P){
     const from = ghostAngle();                 // current animated angle (if mid-tween)
     const to   = mod360(from + stepDeg);
     state.previewRot   = to;                   // target angle
-    state.ghostRotAnim = { from, to, t0: performance.now(), dur: 400 };
+    state.ghostRotAnim = { from, to, t0: performance.now(), dur: PREVIEW_ROT_TWEEN_MS };
     ensureAnimLoop();
     render();                                  // draw first frame immediately    
   });  
