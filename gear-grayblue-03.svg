@@ -1,0 +1,132 @@
+<?xml version="1.0" encoding="UTF-8" standalone="no"?>
+<!-- Created with Inkscape (http://www.inkscape.org/) and export_objects.py -->
+
+<svg
+   version="1.1"
+   id="svg1"
+   width="15.926156"
+   height="15.576549"
+   viewBox="0 0 15.926156 15.576549"
+   sodipodi:docname="gear-grayblue 3.svg"
+   inkscape:version="1.4 (86a8ad7, 2024-10-11)"
+   xmlns:inkscape="http://www.inkscape.org/namespaces/inkscape"
+   xmlns:sodipodi="http://sodipodi.sourceforge.net/DTD/sodipodi-0.dtd"
+   xmlns="http://www.w3.org/2000/svg"
+   xmlns:svg="http://www.w3.org/2000/svg"
+   xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#"
+   xmlns:cc="http://creativecommons.org/ns#"
+   xmlns:dc="http://purl.org/dc/elements/1.1/">
+  <sodipodi:namedview
+     id="namedview1"
+     pagecolor="#000000"
+     bordercolor="#000000"
+     borderopacity="0.25"
+     inkscape:showpageshadow="2"
+     inkscape:pageopacity="0.0"
+     inkscape:pagecheckerboard="true"
+     inkscape:deskcolor="#d1d1d1"
+     inkscape:zoom="45.254834"
+     inkscape:cx="4.331029"
+     inkscape:cy="7.8776115"
+     inkscape:window-width="1920"
+     inkscape:window-height="1009"
+     inkscape:window-x="1912"
+     inkscape:window-y="776"
+     inkscape:window-maximized="1"
+     inkscape:current-layer="svg1"
+     showborder="true"
+     showguides="true">
+    <sodipodi:guide
+       position="2.3353438,7.856404"
+       orientation="0,-1"
+       id="guide1"
+       inkscape:locked="false" />
+    <sodipodi:guide
+       position="7.8552473,10.32685"
+       orientation="1,0"
+       id="guide2"
+       inkscape:locked="false" />
+  </sodipodi:namedview>
+  <defs
+     id="defs139">
+    <linearGradient
+       id="swatch4"
+       inkscape:swatch="solid">
+      <stop
+         style="stop-color:#324261;stop-opacity:1;"
+         offset="0"
+         id="stop4" />
+    </linearGradient>
+    <linearGradient
+       id="swatch3"
+       inkscape:swatch="solid">
+      <stop
+         style="stop-color:#324261;stop-opacity:1;"
+         offset="0"
+         id="stop3" />
+    </linearGradient>
+  </defs>
+  <metadata
+     id="metadata1906">
+    <rdf:RDF>
+      <cc:Work
+         rdf:about="">
+        <dc:format>image/svg+xml</dc:format>
+        <dc:type
+           rdf:resource="http://purl.org/dc/dcmitype/StillImage" />
+        <cc:license
+           rdf:resource="http://creativecommons.org/publicdomain/zero/1.0/" />
+        <dc:date>13 Jan 2019</dc:date>
+        <dc:creator>
+          <cc:Agent>
+            <dc:title>Ramón Miranda</dc:title>
+          </cc:Agent>
+        </dc:creator>
+        <dc:rights>
+          <cc:Agent>
+            <dc:title>see the license tab</dc:title>
+          </cc:Agent>
+        </dc:rights>
+        <dc:subject>
+          <rdf:Bag>
+            <rdf:li>icon ui</rdf:li>
+          </rdf:Bag>
+        </dc:subject>
+        <dc:description>This is a contribution with Inkscape Project from
+Ramon Miranda www.ramonmiranda.com (design and SVG file)
+Jabiertxo (SVG stuff to integrate them in UI)</dc:description>
+        <dc:publisher>
+          <cc:Agent>
+            <dc:title />
+          </cc:Agent>
+        </dc:publisher>
+        <dc:identifier />
+        <dc:source />
+        <dc:relation />
+        <dc:language>-</dc:language>
+        <dc:coverage />
+        <dc:contributor>
+          <cc:Agent>
+            <dc:title>Ramon Miranda
+Jabier Arraiza</dc:title>
+          </cc:Agent>
+        </dc:contributor>
+      </cc:Work>
+      <cc:License
+         rdf:about="http://creativecommons.org/publicdomain/zero/1.0/">
+        <cc:permits
+           rdf:resource="http://creativecommons.org/ns#Reproduction" />
+        <cc:permits
+           rdf:resource="http://creativecommons.org/ns#Distribution" />
+        <cc:permits
+           rdf:resource="http://creativecommons.org/ns#DerivativeWorks" />
+      </cc:License>
+    </rdf:RDF>
+  </metadata>
+  <path
+     id="path420"
+     style="display:inline;fill:#324261;fill-opacity:1;stroke:none;opacity:1;stroke-width:1.12698"
+     d="M 6.1940351 0.35439243 C 5.6900968 0.46293719 5.2229097 0.64654868 4.7526289 0.84657993 L 5.0651289 3.1981424 C 4.7353298 3.3853138 4.4182293 3.6048739 4.1315351 3.8543924 L 1.9538007 2.8192362 C 1.6162015 3.1924388 1.3222961 3.6019661 1.0592695 4.0418924 L 2.7135664 5.7567362 C 2.6348764 5.9296018 2.5644382 6.0946181 2.5026289 6.2782206 L 2.5143476 6.2821268 C 2.4670196 6.43733 2.4280259 6.5888224 2.3932539 6.7469706 L 0.03387887 7.1629862 C -0.01691356 7.6715866 -0.025042905 8.1744227 0.024113245 8.6727518 L 2.4010664 9.1102518 C 2.4831734 9.4790536 2.6062999 9.8407507 2.7604414 10.184471 L 1.1022382 11.897361 C 1.3620193 12.333578 1.6297586 12.755538 1.9713789 13.137596 L 4.1549726 12.110252 C 4.4393931 12.36335 4.760318 12.59023 5.098332 12.786033 L 4.8034101 15.15908 C 5.0304401 15.25591 5.2644978 15.348079 5.504582 15.424705 C 5.7443237 15.502055 5.9900794 15.567532 6.2311445 15.621971 L 7.410832 13.532127 C 7.8005558 13.571637 8.1922049 13.577929 8.5729414 13.539939 L 9.723332 15.645408 C 10.227297 15.536861 10.694439 15.353284 11.164738 15.153221 L 10.852238 12.801658 C 11.182034 12.614483 11.497164 12.394918 11.783879 12.145408 L 13.963566 13.180564 C 14.301146 12.807347 14.593124 12.397861 14.856144 11.957908 L 13.203801 10.243064 C 13.282481 10.070214 13.354888 9.9059451 13.414738 9.7215799 L 13.403019 9.7176737 C 13.449859 9.5623001 13.489129 9.4128634 13.524113 9.2547831 L 15.881535 8.8368143 C 15.932485 8.3282806 15.940431 7.8253624 15.891301 7.3270487 L 13.514348 6.8915018 C 13.432244 6.5227029 13.30912 6.1590507 13.154973 5.8153299 L 14.813176 4.1024393 C 14.553416 3.6662236 14.285666 3.2442936 13.944035 2.8622049 L 11.760441 3.8895487 C 11.476083 3.6362567 11.15512 3.4095715 10.817082 3.2137674 L 11.113957 0.84072055 C 10.886863 0.74396585 10.650104 0.65362212 10.410832 0.57509555 C 10.170785 0.49838673 9.927318 0.43226529 9.6862226 0.37782993 L 8.504582 2.4676737 C 8.114865 2.4281307 7.7232233 2.4218012 7.3424726 2.4598612 L 6.1940351 0.35439243 z M 8.3405195 4.0223612 A 4 4 0 0 1 11.83466 7.4598612 L 10.436223 7.4598612 A 2.65625 2.65625 0 0 0 8.3405195 5.3250956 L 8.3405195 4.0223612 z M 7.3248945 4.0457987 L 7.3248945 5.3270487 A 2.65625 2.65625 0 0 0 5.2213789 7.4266581 L 3.9245039 7.4266581 A 4 4 0 0 1 7.3248945 4.0457987 z M 6.863957 6.8016581 L 8.8209882 6.8016581 C 8.930524 6.8016581 9.0182539 6.8893881 9.0182539 6.9989237 L 9.0182539 8.8622049 C 9.0182539 8.9717407 8.9305238 9.0594705 8.8209882 9.0594706 L 6.863957 9.0594706 C 6.7544212 9.0594706 6.6666914 8.9717405 6.6666914 8.8622049 L 6.6666914 6.9989237 C 6.6666914 6.8893879 6.7544214 6.801658 6.863957 6.8016581 z M 3.9127851 8.4422831 L 5.223332 8.4422831 A 2.65625 2.65625 0 0 0 7.3541914 10.539939 L 7.3541914 11.942283 A 4 4 0 0 1 3.9127851 8.4422831 z M 10.414738 8.4774393 L 11.822941 8.4774393 A 4 4 0 0 1 8.3717695 11.944236 L 8.3717695 10.522361 A 2.65625 2.65625 0 0 0 10.414738 8.4774393 z "
+     transform="translate(0.00518363,-0.2118143)"
+     inkscape:label="Gear" />
+</svg>
