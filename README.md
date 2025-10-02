@@ -310,6 +310,18 @@ If you Bottom it, your Draw state is set to **Used** — you must wait for your 
 - Background gear asset switched to **gear-grayblue-03.svg**.
 - Added a small cache-buster on load to avoid stale art after updates.
 
+### 36) Active Player Selection
+
+- In Main Menu, each color now has an **Active** checkbox in addition to AI toggle and name.
+- Any combination of colors may be chosen; there is **no required order** (doesn’t have to start with Red).
+- Game requires a **minimum of 2 active players** (at least one may be AI).
+- Maximum of **4 total players**, with up to **3 AI**.
+- Inactive players are:
+  - **Skipped automatically** during turn rotation.
+  - Shown as dimmed / greyed-out in the Corners table with score `—` and “(inactive)” tag.
+  - Displayed faintly on the board corners.
+- Active/inactive state is persisted in Save/Load snapshots.
+
 ---
 
 ## Updated Deck (with T/RT) — supersedes older counts

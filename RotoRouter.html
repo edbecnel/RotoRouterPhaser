@@ -22,6 +22,7 @@
     .small { font-size: 12px; }
     .legend { display: grid; grid-template-columns: auto 1fr; gap: 6px 10px; align-items: center; }
     .dot { width: 12px; height: 12px; border-radius: 50%; display: inline-block; border: 1px solid #fff4; }
+    .inactiveRow { opacity: .4; filter: grayscale(.2); }
     canvas { display: block; }
     .toast { position: fixed; left: 380px; bottom: 16px; background: #182031; border: 1px solid #2b3650; padding: 10px 14px; border-radius: 10px; pointer-events: none; opacity: 0; transition: opacity .18s ease; }
     .toast.show { opacity: 1; }
@@ -168,7 +169,8 @@ function loadSetupFromStorage(){
       players: Array.isArray(s.players) ? s.players.map((p,i)=>({
         id: i,
         name: (p && p.name) ? String(p.name) : ['Red','Green','Blue','Yellow'][i],
-        ai: !!(p && p.ai)
+        ai: !!(p && p.ai),
+        active: (p && typeof p.active === 'boolean') ? !!p.active : (i < 2) // default Red/Green active
       })) : null
     };
   } catch(e){ console.warn('setup load failed', e); return null; }
@@ -302,7 +304,7 @@ function loadSetupFromStorage(){
   };
 
   const state={ N:9, cell:64, pad:20, board:makeBoard(9),
-    players:PLAYERS.map(p=>({...p, deck:makeDeck(), drawn:null, tokens:0, tokensRemoved:0, drawLocked:false, drawUsed:false, tokenUsed:false, rollUsed:false, skipCount: 0, elbowSkipCount: 0, forceElbow: false })),    cornerLockTurns: PLAYERS.map(()=>0),
+    players:PLAYERS.map(p=>({...p, deck:makeDeck(), drawn:null, tokens:0, tokensRemoved:0, drawLocked:false, drawUsed:false, tokenUsed:false, rollUsed:false, skipCount: 0, elbowSkipCount: 0, forceElbow: false, active:true })),    cornerLockTurns: PLAYERS.map(()=>0),
     current:0, phase:'idle', subphase:null, highlight:[], hover:null, forcePlace:false, previewRot:0, die:null, tokenSelect:null,
     turnAdvancing:false,
     deadFixDoneThisTurn: false,
@@ -501,6 +503,7 @@ function loadSetupFromStorage(){
       name: p.name,
       color: p.color,
       pocket: p.pocket,
+      active: !!p.active,
       deck: {
         draw: [...(p.deck?.draw || [])],
         discard: [...(p.deck?.discard || [])],
@@ -632,6 +635,7 @@ function loadSetupFromStorage(){
         name: baseP.name,
         color: baseP.color,
         pocket: baseP.pocket,
+        active: (typeof from.active === 'boolean') ? !!from.active : true,
         deck: {
           draw: [...(from.deck?.draw || [])],
           discard: [...(from.deck?.discard || [])],
@@ -1007,13 +1011,14 @@ function cornerFor(pid){
   try { localStorage.setItem('rr.setup', JSON.stringify(state.setup)); } catch {}    state.board = makeBoard(state.N);
     initGearOffsets(state.N); // <- add this
     state.players = PLAYERS.map(p=>{
-      const cfg = (state.setup?.players && state.setup.players[p.id]) || { name:p.name, ai:false };
+      const cfg = (state.setup?.players && state.setup.players[p.id]) || { name:p.name, ai:false, active:(p.id<2) };
       return {
         id: p.id,
         name: cfg.name || p.name,
         color: p.color,
         pocket: p.pocket,
         ai: !!cfg.ai,
+        active: !!cfg.active,
         deck: makeDeck(state.N),
         drawn:null, tokens:0, tokensRemoved:0,
         drawLocked:false, drawUsed:false, tokenUsed:false, rollUsed:false,
@@ -1047,10 +1052,16 @@ function cornerFor(pid){
   }
 
   function startTurn(){
-    // Find the next *active* player without recursive calls.
+     // Find the next *eligible* player without recursive calls.
     let hops = 0;
     while (hops < state.players.length) {
       const Ptest = state.players[state.current];
+      // Skip colors that are not active from setup
+      if (!Ptest.active) {
+        state.current = (state.current + 1) % state.players.length;
+        hops++;
+        continue;
+      }      
       const onBoardTest = countTokens(Ptest.id);
       const finished    = playerHasFinished(Ptest);
       const outOfTokens = ((Ptest.tokensRemoved|0) >= TOKENS_MAX) && onBoardTest === 0;
@@ -2292,6 +2303,10 @@ function checkForceElbow(P){
 
     for (const p of state.players) {
       const pid = p.id;
+      const tr  = tb.querySelector(`tr[data-pid="${pid}"]`);
+      if (tr) {
+        tr.classList.toggle('inactiveRow', !p.active);
+      }      
       // reached is stored as Set of player names (e.g., 'Red', 'Green')
       const reachedSet = p.reached
         ? (Array.isArray(p.reached) ? new Set(p.reached) : p.reached)
@@ -2306,8 +2321,8 @@ function checkForceElbow(P){
 
       const qEl = document.getElementById(`quad-${pid}`);
       const sEl = document.getElementById(`score-${pid}`);
-      if (qEl) qEl.textContent = quadText(p.pocket);
-      if (sEl) sEl.textContent = scoreStr;
+      if (qEl) qEl.textContent = quadText(p.pocket) + (p.active ? '' : ' (inactive)');
+      if (sEl) sEl.textContent = p.active ? scoreStr : '—';
     }
   }
 
@@ -2767,6 +2782,8 @@ function checkForceElbow(P){
     ctx.save();
     ctx.globalAlpha = 0.85;
     for (const P of PLAYERS){
+      const live = state.players[P.id]?.active !== false;
+      ctx.globalAlpha = live ? 0.85 : 0.25;
       const c = cornerFor(P.id);
       const px = c.x * cell, py = c.y * cell;
       ctx.beginPath();
@@ -2802,6 +2819,7 @@ function checkForceElbow(P){
 
   function drawTurnCornerHighlight(){
     const P=currentPlayer();
+    if (!P.active) return; // should not happen, but guard the highlight
     const corner = cornerFor(P.id);
     const cell=state.cell;
     ctx.save();

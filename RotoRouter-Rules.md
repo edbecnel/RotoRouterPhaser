@@ -13,7 +13,9 @@ Be the first to **score 3 corners** by moving your tokens onto _three different 
 ## Setup
 
 - Choose **board size**: _7×7_ or _9×9_ (Main Menu).
-- Each player picks a **color** and **name** (AI flags optional).
+- Each color may be marked **Active** or left **Inactive** (minimum 2 active, maximum 4).
+- Active players can optionally be flagged as **AI** and assigned a **name**.
+- Inactive players are skipped during turn rotation and appear dimmed in the Corners table/board.
 - Everyone starts with **no tokens on the board**. Your **home corner** is your color’s corner.
 
 ---

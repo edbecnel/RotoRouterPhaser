@@ -47,12 +47,15 @@
       </div>
     </div>
 
-    <h2>Players (choose names; toggle AI)</h2>
+    <h2>Players (activate players; optional AI & names)</h2>
     <div class="grid-4">
       <div class="box">
         <div class="row" style="justify-content:space-between;">
           <span class="row"><span class="dot" style="background:#ff6b6b"></span>&nbsp;Red</span>
-          <label class="row muted"><input id="ai-red" type="checkbox"> AI</label>
+          <span class="row muted" style="gap:12px">
+            <label class="row muted"><input id="active-red" type="checkbox" checked> Active</label>
+            <label class="row muted"><input id="ai-red" type="checkbox"> AI</label>
+          </span>
         </div>
         <label>Name</label>
         <input id="name-red" type="text" placeholder="Red" value="Red">
@@ -60,7 +63,10 @@
       <div class="box">
         <div class="row" style="justify-content:space-between;">
           <span class="row"><span class="dot" style="background:#6bff95"></span>&nbsp;Green</span>
-          <label class="row muted"><input id="ai-green" type="checkbox" checked> AI</label>
+          <span class="row muted" style="gap:12px">
+            <label class="row muted"><input id="active-green" type="checkbox" checked> Active</label>
+            <label class="row muted"><input id="ai-green" type="checkbox" checked> AI</label>
+          </span>          
         </div>
         <label>Name</label>
         <input id="name-green" type="text" placeholder="Green" value="Green">
@@ -68,7 +74,10 @@
       <div class="box">
         <div class="row" style="justify-content:space-between;">
           <span class="row"><span class="dot" style="background:#6bd9ff"></span>&nbsp;Blue</span>
-          <label class="row muted"><input id="ai-blue" type="checkbox" checked> AI</label>
+          <span class="row muted" style="gap:12px">
+            <label class="row muted"><input id="active-blue" type="checkbox"> Active</label>
+            <label class="row muted"><input id="ai-blue" type="checkbox" checked> AI</label>
+          </span>          
         </div>
         <label>Name</label>
         <input id="name-blue" type="text" placeholder="Blue" value="Blue">
@@ -76,7 +85,10 @@
       <div class="box">
         <div class="row" style="justify-content:space-between;">
           <span class="row"><span class="dot" style="background:#ffef6b"></span>&nbsp;Yellow</span>
-          <label class="row muted"><input id="ai-yellow" type="checkbox" checked> AI</label>
+          <span class="row muted" style="gap:12px">
+            <label class="row muted"><input id="active-yellow" type="checkbox"> Active</label>
+            <label class="row muted"><input id="ai-yellow" type="checkbox" checked> AI</label>
+          </span>
         </div>
         <label>Name</label>
         <input id="name-yellow" type="text" placeholder="Yellow" value="Yellow">
@@ -98,11 +110,11 @@
   function collectSetup(){
     const boardSize = parseInt(($('setupBoardSize')?.value || '9'), 10);
     const players = [
-      { id:0, name: ($('name-red').value||'Red').trim(),      ai: !!$('ai-red').checked },
-      { id:1, name: ($('name-green').value||'Green').trim(),  ai: !!$('ai-green').checked },
-      { id:2, name: ($('name-blue').value||'Blue').trim(),    ai: !!$('ai-blue').checked },
-      { id:3, name: ($('name-yellow').value||'Yellow').trim(),ai: !!$('ai-yellow').checked },
-    ];
+      { id:0, name: ($('name-red').value||'Red').trim(),       ai: !!$('ai-red').checked,       active: !!$('active-red').checked },
+      { id:1, name: ($('name-green').value||'Green').trim(),   ai: !!$('ai-green').checked,     active: !!$('active-green').checked },
+      { id:2, name: ($('name-blue').value||'Blue').trim(),     ai: !!$('ai-blue').checked,      active: !!$('active-blue').checked },
+      { id:3, name: ($('name-yellow').value||'Yellow').trim(), ai: !!$('ai-yellow').checked,    active: !!$('active-yellow').checked },
+  ];
     return { boardSize, players, mode:'local' };
   }
 
@@ -114,8 +126,9 @@
 
   function startGame(){
     const setup = persistSetup();
-    if (!setup.players.some(p=>!p.ai)){
-      alert('At least one human player is required for now.');
+    const activeCount = setup.players.filter(p => !!p.active).length;
+    if (activeCount < 2) {
+      alert('Please activate at least 2 players (any colors).');
       return;
     }
     // cache-buster to ensure fresh load
@@ -130,12 +143,16 @@
       const c = map[i];
       if ($('name-'+c) && p?.name) $('name-'+c).value = p.name;
       if ($('ai-'+c)) $('ai-'+c).checked = !!p?.ai;
+      if ($('active-'+c)) $('active-'+c).checked = (p?.active ?? (i<2)); // default Red/Green active
     });
     if ($('setupBoardSize') && prev.boardSize) $('setupBoardSize').value = String(prev.boardSize);
   }
 
   // ---- live-save on every change (so leaving still applies) ----
-  ['setupBoardSize','name-red','name-green','name-blue','name-yellow','ai-red','ai-green','ai-blue','ai-yellow']
+  ['setupBoardSize',
+   'name-red','name-green','name-blue','name-yellow',
+   'ai-red','ai-green','ai-blue','ai-yellow',
+   'active-red','active-green','active-blue','active-yellow']  
     .forEach(id => { const el=$(id); if (el) el.addEventListener('input', persistSetup); });
 
   // ---- buttons (still work) ----
