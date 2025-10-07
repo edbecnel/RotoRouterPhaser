@@ -331,6 +331,16 @@ If you Bottom it, your Draw state is set to **Used** — you must wait for your 
 - While in this mode, the ghost no longer disappears when moving the pointer away from the board.
 - This improvement ensures complete touch/mouse parity for placement rotation.
 
+### 38) Rotation normalization & token connectivity
+
+- **Fix:** Some tiles carried non-orthogonal angles (e.g., 179°, 269°) due to legacy states or mid-animation clicks. This caused pathfinding to misread openings, so valid connections weren’t highlighted for token moves.
+- **What changed:**
+  - All rotations are **snapped to 0/90/180/270** when computing openings, when **placing/rotating** a tile, when **loading** a save, and in the **ghost preview**.
+  - `rotDir(...)`, `rotatedOpenings(...)`, and `rotatedOpeningsType(...)` now operate on snapped angles; placement/rotation commits also store snapped values.
+- **Player-visible effect:** Token movement highlights are now correct in edge cases.  
+  _Example:_ A **T** on your corner with the stem facing **down**, a **Cross** to the right, and a **Straight (vertical)** below now correctly shows the straight below as reachable when you click **Token Action**.
+- **Tech note:** Introduced `snap90(deg)` and routed all rotation math through it; history/animation behavior is unchanged.
+
 ---
 
 ## Updated Deck (with T/RT) — supersedes older counts

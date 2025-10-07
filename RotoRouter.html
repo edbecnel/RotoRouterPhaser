@@ -262,10 +262,19 @@ function loadSetupFromStorage(){
     T:        [[1,0],[-1,0],[0,-1]]      // base: ┴  (open E, W, N; closed S) — rotation adds others
   };
 
-  function rotDir([dx,dy],deg){ const t=((deg%360)+360)%360; if(t===0) return [dx,dy]; if(t===90) return [-dy,dx]; if(t===180) return [-dx,-dy]; if(t===270) return [dy,-dx]; return [dx,dy]; }
+  function rotDir([dx,dy],deg){
+    const t = snap90(deg);
+    if(t===0)   return [dx,dy];
+    if(t===90)  return [-dy,dx];
+    if(t===180) return [-dx,-dy];
+    if(t===270) return [dy,-dx];
+    return [dx,dy];
+  }
+
   function rotatedOpenings(cell){
     if(!cell.track || cell.track==='Block') return [];
-    return OPENINGS[cell.track].map(([dx,dy])=>rotDir([dx,dy], cell.rot));
+    const r = snap90(cell.rot|0);
+    return OPENINGS[cell.track].map(([dx,dy])=>rotDir([dx,dy], r));
   }
   function hasReciprocal(aCell, bCell, dx, dy){
     const aOk = rotatedOpenings(aCell).some(([rx,ry])=>rx===dx && ry===dy);
@@ -620,7 +629,7 @@ function loadSetupFromStorage(){
         const s = (snap.board[y] && snap.board[y][x]) || {};
         state.board[y][x] = {
           track: s.track ?? null,
-          rot: (s.rot|0) % 360,
+          rot: snap90(s.rot|0),
           owner: (s.owner==null? null : s.owner|0),
           token: (s.token==null? null : s.token|0),
         };
@@ -811,10 +820,10 @@ function cornerFor(pid){
 
   // ---- Dead-Straight detection helpers (STRICT: "trapped straight") ----
   function isStraightHorizontal(cell){
-    return !!cell && cell.track === 'Straight' && ((cell.rot|0) % 180 === 0); // 0 or 180
+    return !!cell && cell.track === 'Straight' && (snap90(cell.rot) % 180 === 0);
   }
   function isStraightVertical(cell){
-    return !!cell && cell.track === 'Straight' && ((cell.rot|0) % 180 !== 0); // 90 or 270
+    return !!cell && cell.track === 'Straight' && (snap90(cell.rot) % 180 !== 0);
   }
 
   // STRICT + BORDER rule:
@@ -1325,7 +1334,10 @@ function cornerNeighbors(pid){ // returns [{x,y} corner, {x,y} n1, {x,y} n2]
 // the minimal number of tiles you'd need to rotate (corner and/or that neighbor) to create
 // a reciprocal connection is > 1. In other words: there is NO one-tile fix.
 const RR_ROTATIONS = [0,90,180,270];
-function rotatedOpeningsType(type, rot){ return OPENINGS[type].map(([dx,dy])=>rotDir([dx,dy], rot)); }
+function rotatedOpeningsType(type, rot){
+  const r = snap90(rot|0);
+  return OPENINGS[type].map(([dx,dy])=>rotDir([dx,dy], r));
+}
 function hasReciprocalTypes(typeA, rotA, typeB, rotB, dx, dy){
   const aOK = rotatedOpeningsType(typeA, rotA).some(([rx,ry])=>rx===dx && ry===dy);
   if(!aOK) return false;
@@ -1668,7 +1680,7 @@ function checkForceElbow(P){
       const placedType = baseDrawnType(P.drawn);
       pushHistory('Place/Replace');
       cell.track = placedType;
-      cell.rot   = mod360(state.previewRot || 0);
+      cell.rot   = snap90(state.previewRot || 0);
       cell.owner = P.id;
 
       P.deck.discard.push(P.drawn);
@@ -1833,6 +1845,7 @@ function checkForceElbow(P){
   }
   function thetaFor(face){ if(face==='CW90') return 90; if(face==='CCW90') return -90; if(face==='DEG180') return 180; return 0; }
   function mod360(a){ return (((a%360)+360)%360); }
+  function snap90(a){ return mod360(Math.round(a/90) * 90); }
 
   // === Rotation animation helpers (anchor: RR_ROTATE_ANIMS) ===
   // Define these BEFORE render() and applyRotation() (consts are not hoisted)
@@ -1904,9 +1917,9 @@ function checkForceElbow(P){
       // 2) Only rotate/tween tiles that actually have tracks.
       if(!cell.track || cell.track==='Block') continue;
       const fromRot = cell.rot;
-      const toRot   = mod360(cell.rot + sign*base);
+      const toRot   = snap90(cell.rot + sign*base);
       startRotateAnim(x,y, fromRot, toRot, RR_APPLY_TWEEN_MS);
-      cell.rot = toRot; // commit; tween overlays visually
+      cell.rot = toRot;
       rotated++;
       }
     }
@@ -2065,7 +2078,7 @@ function checkForceElbow(P){
             }
             const placedType = baseDrawnType(P.drawn);
             pushHistory('Place/Replace');
-            cell.track=placedType; cell.rot=state.previewRot; cell.owner=P.id;
+            cell.track=placedType; cell.rot=snap90(state.previewRot); cell.owner=P.id;
             P.deck.discard.push(P.drawn); P.drawn=null;
             P.skipCount = 0;
             state.forcePlace = false;
@@ -2090,7 +2103,7 @@ function checkForceElbow(P){
          && state.rotateFocus.x===x
          && state.rotateFocus.y===y) {
         // Commit the preview orientation (no re-animate; user already saw the ghost at final angle)
-        const toRot   = mod360((state.previewRot ?? cell.rot));
+        const toRot   = snap90(state.previewRot ?? cell.rot);
         cell.rot = toRot;
         P.deck.discard.push(P.drawn); P.drawn = null;
         P.skipCount = 0;
@@ -2114,7 +2127,7 @@ function checkForceElbow(P){
         const placedType = baseDrawnType(P.drawn);
         pushHistory('Place/Replace');
         cell.track = placedType;
-        cell.rot   = mod360(state.previewRot || 0);
+        cell.rot   = snap90(state.previewRot || 0);
         cell.owner = P.id;
 
         P.deck.discard.push(P.drawn);
@@ -2202,7 +2215,7 @@ function checkForceElbow(P){
       if(state.rotateFocus){ const rf=state.rotateFocus; const cc=state.board[rf.y][rf.x]; cc.rot=rf.original; state.rotateFocus=null; state.subphase=null; }
           const placedType = baseDrawnType(P.drawn);
           pushHistory('Place/Replace');
-          cell.track=placedType; cell.rot=state.previewRot; cell.owner=P.id;
+          cell.track=placedType; cell.rot=snap90(state.previewRot); cell.owner=P.id;
           P.deck.discard.push(P.drawn); P.drawn=null;
           P.skipCount = 0;
           state.forcePlace = false;   // placing satisfies the force rule
@@ -2393,8 +2406,8 @@ function checkForceElbow(P){
 
     if (!(rotatingExisting || rotatingNew)) return;
 
-    const from = ghostAngle();               // current anim angle
-    const to   = mod360(from + stepDeg);     // land on 90° grid
+    const from = ghostAngle();
+    const to   = snap90(from + stepDeg);
     state.previewRot   = to;
     state.ghostRotAnim = { from, to, t0: performance.now(), dur: PREVIEW_ROT_TWEEN_MS };
     ensureAnimLoop();
