@@ -68,7 +68,17 @@
           <button class="btn" id="placeBtn">Place</button>
           <button class="btn" id="bottomBtn">Bottom</button>
         </div>
-        <div class="row small muted nowrap"><span>Hover shows a <b>ghost</b>. Click to place. Rotate with Q/E.</span></div>
+        <div class="row">
+          <button class="btn" id="rotateCCWBtn">⟲ CCW</button>
+          <button class="btn" id="rotateCWBtn">⟳ CW</button>
+          <span id="rotateTag" class="tag">Rotate: —</span>
+        </div>
+        <div class="row small muted">
+          On touch devices: tap a legal cell to enter <b>rotation mode</b>, use the buttons (or Q/E) to rotate, then tap again to place.
+        </div>
+        <div class="row small muted nowrap">
+          <span>Hover shows a <b>ghost</b>. Tap/click a legal cell to rotate it first, then tap/click again to place. Rotate with Q/E or the buttons.</span>
+        </div>
         <hr style="border-color:#1f2636"/>
         <div class="row"><b>Token</b></div>
         <div class="row">
@@ -1648,6 +1658,45 @@ function checkForceElbow(P){
 }
 
   function placeMode(){
+    // --- CONFIRM: if we are in rotateNew (tap-to-rotate) and a focus exists, commit placement ---
+    if (state.phase === 'place' && state.subphase === 'rotateNew' && state.rotateFocus) {
+      const P = currentPlayer();
+      const { x, y } = state.rotateFocus;
+      const cell = state.board[y][x];
+
+      // Commit at the preview angle
+      const placedType = baseDrawnType(P.drawn);
+      pushHistory('Place/Replace');
+      cell.track = placedType;
+      cell.rot   = mod360(state.previewRot || 0);
+      cell.owner = P.id;
+
+      P.deck.discard.push(P.drawn);
+      P.drawn = null;
+      P.skipCount = 0;
+      state.forcePlace = false;
+      if (placedType === TrackCard.Elbow) {
+        P.elbowSkipCount = 0;
+        state.forceElbowFor = null;
+      }
+
+      pulse(x,y);
+      state.ghostRotAnim = null;
+      state.subphase = null;
+      state.rotateFocus = null;
+      state.previewRot  = 0;
+      state.phase='idle';
+      state.highlight=[];
+      state.hover=null;
+
+      if (typeof onTopologyChanged === 'function') onTopologyChanged();
+      render();
+      updateHUD();
+      setStatus('Placed. You cannot draw again this turn.');
+      maybeAutoAdvance();
+      return;
+    }
+
     const P=currentPlayer();
     if (state.boardSaturated && !isRotationCard(P.drawn)){
       setStatus('Board is full of tracks — only RS/RE/RC can be placed (rotate/replace).');
@@ -2053,7 +2102,47 @@ function checkForceElbow(P){
         onTopologyChanged();
         render(); updateHUD(); setStatus('Rotation applied.'); maybeAutoAdvance();
         return;
-      }      
+      }
+
+      // --- NEW-PLACEMENT: COMMIT after rotation if tapping same focused cell ---
+      if (state.subphase==='rotateNew' && state.rotateFocus &&
+          state.rotateFocus.x===x && state.rotateFocus.y===y) {
+        const P = currentPlayer();
+        const cell = state.board[y][x];
+
+        // Commit at the preview angle
+        const placedType = baseDrawnType(P.drawn);
+        pushHistory('Place/Replace');
+        cell.track = placedType;
+        cell.rot   = mod360(state.previewRot || 0);
+        cell.owner = P.id;
+
+        P.deck.discard.push(P.drawn);
+        P.drawn = null;
+        P.skipCount = 0;
+        state.forcePlace = false;
+
+        if (placedType === TrackCard.Elbow) {
+          P.elbowSkipCount = 0;
+          state.forceElbowFor = null;
+        }
+
+        pulse(x,y);
+        state.ghostRotAnim = null;
+        state.subphase = null;
+        state.rotateFocus = null;
+        state.previewRot  = 0;
+        state.phase='idle';
+        state.highlight=[];
+        state.hover=null;
+
+        if (typeof onTopologyChanged === 'function') onTopologyChanged();
+        render();
+        updateHUD();
+        setStatus('Placed. You cannot draw again this turn.');
+        maybeAutoAdvance();
+        return;
+      }
 
       // === RS/RE: ENTER rotateExisting BEFORE legal-cell gating ===
       // Allow rotating ANY existing tile of the same base type (even on first turn).
@@ -2074,6 +2163,20 @@ function checkForceElbow(P){
       // For everything else, we still require the cell to be legal
       const legal = state.highlight.some(h=>h.x===x&&h.y===y);
       if(!legal){ toast('Not a legal cell'); return; }
+
+      // If it's a legal EMPTY cell for a NEW placement, enter rotateNew subphase first
+      if (!cell.track && state.subphase !== 'rotateExisting') {
+        state.subphase    = 'rotateNew';
+        state.rotateFocus = { x, y, original: 0 };
+        // Start preview angle from whatever the ghost shows now
+        state.previewRot  = mod360(ghostAngle() || 0);
+        state.hover       = {x,y};
+        state.highlight   = [{x,y}]; // show focus box
+        setStatus('Rotate with ⟲/⟳ (or Q/E), then tap again to place.');
+        render();
+        updateHUD();
+        return;
+      }
 
       // RC: Replaceable Cross — claim any existing track type on click
       if (P.drawn===TrackCard.RCross && cell.track){
@@ -2238,6 +2341,7 @@ function checkForceElbow(P){
     }
 
     const stepDeg = (k==='q' ? -90 : 90);      // Q=CCW, E=CW
+    rotatePreview(stepDeg);
     const from = ghostAngle();                 // current animated angle (if mid-tween)
     const to   = mod360(from + stepDeg);
     state.previewRot   = to;                   // target angle
@@ -2265,6 +2369,8 @@ function checkForceElbow(P){
     overrideBtn.style.display = 'none';
     toast('Override used: End Turn enabled.');
   });
+  btn('rotateCCWBtn').addEventListener('click', ()=>rotatePreview(-90));
+  btn('rotateCWBtn').addEventListener('click',  ()=>rotatePreview(+90));
   btn('tokenBtn').addEventListener('click', tokenMode);
   btn('rollBtn').addEventListener('click', rollDie);
   btn('applyBtn').addEventListener('click', applyRotation);
@@ -2277,6 +2383,23 @@ function checkForceElbow(P){
     if (f) loadFromFile(f);
     e.target.value = ''; // reset so the same file can be chosen again later
   });
+
+  function rotatePreview(stepDeg){
+    if (state.phase !== 'place') return;
+
+    // Can rotate if: rotating an existing tile OR rotating a new placement focus
+    const rotatingExisting = (state.subphase === 'rotateExisting' && state.rotateFocus);
+    const rotatingNew      = (state.subphase === 'rotateNew'      && state.rotateFocus);
+
+    if (!(rotatingExisting || rotatingNew)) return;
+
+    const from = ghostAngle();               // current anim angle
+    const to   = mod360(from + stepDeg);     // land on 90° grid
+    state.previewRot   = to;
+    state.ghostRotAnim = { from, to, t0: performance.now(), dur: PREVIEW_ROT_TWEEN_MS };
+    ensureAnimLoop();
+    render();
+  }
 
   // Undo/Redo buttons
   document.getElementById('undoGlobalBtn').addEventListener('click', undoGlobal);
@@ -2354,6 +2477,13 @@ function checkForceElbow(P){
   }
 
   function updateHUD(){
+    (function(){
+      const b = document.getElementById('placeBtn');
+      if (!b) return;
+      const confirming = (state.phase==='place' && state.subphase==='rotateNew' && !!state.rotateFocus);
+      b.textContent = confirming ? 'Confirm' : 'Place';
+    })();
+
     if (state.phase === 'gameOver') {
       const P = currentPlayer();
       turnTag().textContent  = 'Turn: —';
@@ -2470,7 +2600,6 @@ function checkForceElbow(P){
       btn('placeBtn').disabled  = !P.drawn || !holdingRotation;   // only RS/RE/RC can act on full board
       // Bottom blocked while elbow is being forced and placeable
       btn('bottomBtn').disabled = !P.drawn || state.forcePlace || elbowForceNow;
-
       // End Turn blocked while elbow is being forced and placeable
       endTurnBtn.disabled = !!elbowForceNow;
       overrideBtn.style.display = 'none';
@@ -2724,6 +2853,12 @@ function checkForceElbow(P){
     if(state.phase==='place' && state.subphase==='rotateExisting' && state.rotateFocus) {
       const rf = state.rotateFocus; const c = state.board[rf.y][rf.x];
       drawTrack(c.track, ghostAngle(), rf.x, rf.y, 0.9);    
+    }
+    else if (state.phase==='place' && state.subphase==='rotateNew' && state.rotateFocus) {
+      const rf = state.rotateFocus;
+      const P  = currentPlayer();
+      // Draw the to-be-placed piece at the focused cell, regardless of mouse hover
+      drawTrack(baseDrawnType(P.drawn), ghostAngle(), rf.x, rf.y, 0.55);
     }
     else if(state.phase==='place' && state.hover && P.drawn){
       const {x,y}=state.hover;

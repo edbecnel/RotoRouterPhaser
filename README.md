@@ -322,6 +322,15 @@ If you Bottom it, your Draw state is set to **Used** — you must wait for your 
   - Displayed faintly on the board corners.
 - Active/inactive state is persisted in Save/Load snapshots.
 
+### 37) Touch / Tablet Rotation Support
+
+- Players can now rotate new placements without a keyboard.
+- On touch devices, tapping a legal empty cell enters **rotation mode** (ghost remains visible).
+- Use the new **⟲ CCW** and **⟳ CW** buttons to rotate the ghost track.
+- Tap the same cell again **or** press the **Place** button (now labeled **Confirm**) to finalize the placement.
+- While in this mode, the ghost no longer disappears when moving the pointer away from the board.
+- This improvement ensures complete touch/mouse parity for placement rotation.
+
 ---
 
 ## Updated Deck (with T/RT) — supersedes older counts
