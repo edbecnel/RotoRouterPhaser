@@ -1671,6 +1671,43 @@ function checkForceElbow(P){
 }
 
   function placeMode(){
+    // --- CONFIRM (RS/RE/RT): if we are rotating an existing tile and a focus exists, commit rotation ---
+    if (state.phase === 'place' && state.subphase === 'rotateExisting' && state.rotateFocus) {
+      const P = currentPlayer();
+      const { x, y } = state.rotateFocus;
+      const cell = state.board[y][x];
+
+      // Commit the preview orientation (snap to 0/90/180/270)
+      const toRot = snap90(state.previewRot ?? cell.rot);
+
+      pushHistory('Rotation (RS/RE/RT) Confirm');
+      cell.rot = toRot;
+
+      // Discard the RS/RE/RT card and clear force/skip counters appropriately
+      P.deck.discard.push(P.drawn);
+      P.drawn = null;
+      P.skipCount = 0;
+      state.forcePlace = false;
+
+      // Reset subphase & UI
+      state.subphase   = null;
+      state.rotateFocus = null;
+      state.previewRot = 0;
+      state.ghostRotAnim = null;
+
+      pulse(x, y);
+      state.phase = 'idle';
+      state.highlight = [];
+      state.hover = null;
+
+      if (typeof onTopologyChanged === 'function') onTopologyChanged();
+      render();
+      updateHUD();
+      setStatus('Rotation applied.');
+      maybeAutoAdvance();
+      return;
+    }
+
     // --- CONFIRM: if we are in rotateNew (tap-to-rotate) and a focus exists, commit placement ---
     if (state.phase === 'place' && state.subphase === 'rotateNew' && state.rotateFocus) {
       const P = currentPlayer();
@@ -2168,7 +2205,7 @@ function checkForceElbow(P){
           state.previewRot  = cell.rot;
           state.hover       = {x,y};
           state.highlight   = [{x,y}];   // show selection
-          setStatus('Rotating '+base+': use Q/E to rotate; click again to confirm.');
+          setStatus('Rotating ' + base + ': use ⟲/⟳ or Q/E to rotate; click again or press “Confirm” to apply.');
           render(); updateHUD();
           return;
         }
@@ -2494,7 +2531,10 @@ function checkForceElbow(P){
     (function(){
       const b = document.getElementById('placeBtn');
       if (!b) return;
-      const confirming = (state.phase==='place' && state.subphase==='rotateNew' && !!state.rotateFocus);
+      const confirming =
+        (state.phase === 'place') &&
+        !!state.rotateFocus &&
+        (state.subphase === 'rotateNew' || state.subphase === 'rotateExisting');
       b.textContent = confirming ? 'Confirm' : 'Place';
     })();
 

@@ -345,6 +345,17 @@ If you Bottom it, your Draw state is set to **Used** — you must wait for your 
 
 - **Fix:** Loading a saved game always reverted player names to defaults. The loader now restores `players[].name` from the save (and `players[].ai` when present).
 
+### 40) Confirm button for RS/RE/RT rotations
+
+- **Fix:** When using **RS**, **RE**, or **RT** to rotate an existing track, the **Place** button did not change to **“Confirm”**, forcing players to click the tile again to commit.
+- **New behavior:**
+  - During any **rotate-existing** phase (`RS/RE/RT`), the **Place** button now changes to **Confirm**.
+  - Pressing **Confirm** immediately finalizes the rotation — no extra tile click required.
+  - Works identically to the **rotate-new** flow used during normal placement or tablet rotation mode.
+- **UI text update:** The status line now reads:  
+  _“Rotating (type): use ⟲/⟳ or Q/E to rotate; click again or press ‘Confirm’ to apply.”_  
+  for consistent touch and keyboard guidance.
+
 ---
 
 ## Updated Deck (with T/RT) — supersedes older counts
