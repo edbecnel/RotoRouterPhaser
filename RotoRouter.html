@@ -651,9 +651,10 @@ function loadSetupFromStorage(){
       const from = snap.players.find(pp => pp.id === baseP.id) || {};
       return {
         id: baseP.id,
-        name: baseP.name,
+        name: (typeof from.name === 'string' && from.name.trim()) ? from.name : baseP.name,
         color: baseP.color,
         pocket: baseP.pocket,
+        ai: (typeof from.ai === 'boolean') ? !!from.ai : (typeof baseP.ai === 'boolean' ? !!baseP.ai : false),
         active: (typeof from.active === 'boolean') ? !!from.active : true,
         deck: {
           draw: [...(from.deck?.draw || [])],

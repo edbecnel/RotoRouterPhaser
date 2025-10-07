@@ -341,6 +341,10 @@ If you Bottom it, your Draw state is set to **Used** — you must wait for your 
   _Example:_ A **T** on your corner with the stem facing **down**, a **Cross** to the right, and a **Straight (vertical)** below now correctly shows the straight below as reachable when you click **Token Action**.
 - **Tech note:** Introduced `snap90(deg)` and routed all rotation math through it; history/animation behavior is unchanged.
 
+### 39) Load restores saved player names (and AI flag)
+
+- **Fix:** Loading a saved game always reverted player names to defaults. The loader now restores `players[].name` from the save (and `players[].ai` when present).
+
 ---
 
 ## Updated Deck (with T/RT) — supersedes older counts
