@@ -1,4 +1,72 @@
-# RotoRouter — No-Block Edition
+# RotoRouter
+
+A tactical route-building board game with optional AI players.
+
+---
+
+## What’s new (Oct 2025)
+
+### Gameplay/UI
+
+- **Standings panel** at the top of the sidebar shows active players only. Rankings remain hidden until the _first_ scoring event; the first scorer becomes **1st** (bold), all others start as **2nd**. Ties display as **T-1st**, **T-2nd**, etc.
+- **Corners table** now includes a **Place** column mirroring the Standings.
+- **Dual-use rotation cards:** **RS/RE/RT/RC** can rotate/replace **existing** tiles _or_ be placed as **new** Straight/Elbow/T/Cross, respectively.
+- **Deck scaling** for 2–3 active players so the total track supply stays healthy. Per-player minimums:
+  - **7×7:** 7 Straight, 6 Elbow, 3 T, 1 Cross
+  - **9×9:** 9 Straight, 8 Elbow, 3 T, 1 Cross  
+    Rotation cards scale with the deck. Decks are built at **New Game** from board size + active player count.
+- **Touch rotation mode:** tap a legal empty cell to preview; use **Q/E** or the ⟲/⟳ buttons to rotate; tap again (or **Confirm**) to place.
+
+### Rules/Edge-cases
+
+- **Forced-play** counters:
+  - **3 skipped tracks** → next drawn track must be placed _if_ legal.
+  - **3 skipped elbows** → next Elbow drawn must be placed _if_ legal.
+  - If a forced card has **no legal placement**, the force is **waived** (no deadlocks).
+- **Pass-through corners:** tokens may **pass through** corners they’ve already scored but **cannot stop** on those corners again.
+- **Dead-Straight fix:** fully trapped Straights can be converted to Cross (one per turn) at the start of your turn.
+- **Corner fix:** if your home corner is sealed, you must Cross it before other actions.
+
+### AI (Robot)
+
+- **Path-seeking movement:** prefers moves that strictly reduce Manhattan distance to any **unreached** opponent corner; avoids immediate back-tracking and short loops.
+- **Anti-bounce memory:** remembers the last hop and a per-turn visited set to stop A↔B oscillation.
+- **Stall handling:** when no progress is possible, AI prioritizes **die rotations** and conservatively **skips RS/RE/RT/RC**, saving them for endgame connections.
+- **Dual-use awareness:** **RT** now mirrors **RS/RE** behavior for placement _and_ rotation.
+- **Save/Load:** AI flags, per-turn memory, and counters survive snapshot load.
+
+### Bug fixes
+
+- Fixed undefined refs (`firstPlace`, `firstPlacementRelax`, `oppId`, `oppCorners`, `best`) that could halt turns.
+- Fixed cases where AI removed a Straight during RS/RE/RT without re-placing/rotating.
+- Fixed forced-play counters not resetting in some flows (draw, bottom, waive).
+- Fixed deck-full state where drawing should remain allowed if **any** rotation cards remain in the deck.
+
+---
+
+## How to play
+
+Open `RotoRouter.html` in a modern desktop browser. For rules and examples, see **RotoRouterHelp.html** or **RotoRouter-Rules.md**.
+
+**Controls**
+
+- Rotate preview: **Q/E** (or ⟲/⟳ on sidebar)
+- Confirm placement: click again or **Confirm**
+- Token move: select **Token Action**, click a token, then a highlighted destination
+- Undo/Redo: per-turn or global
+
+---
+
+## Save/Load
+
+Use the **Save Game / Load Game** buttons in the sidebar to export/import a JSON snapshot. AI state is included.
+
+---
+
+## Known limitations
+
+- AI favors short, safe progress; it won’t search arbitrarily deep “sacrifices”. This is intentional to keep turns brisk.
+- Rare layouts may still require a few extra rotations to connect a final corner; this is mitigated by the stall logic.
 
 +**Build:** 2025-10-01
 

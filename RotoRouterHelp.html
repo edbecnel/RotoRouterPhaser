@@ -80,6 +80,10 @@
       <li><b>RC</b> — replace <i>any</i> existing tile with a <b>Cross</b> <i>or</i> place a new <b>Cross</b></li>
     </ul>
 
+    <p><b>Deck scaling:</b> With 2–3 active players, your personal deck grows so total track supply stays healthy.
+    The game also enforces per-player minimums (7×7: 7/6/3/1; 9×9: 9/8/3/1 for Straight/Elbow/T/Cross).
+    Rotation cards (<b>RS/RE/RT/RC</b>) scale too. Decks are built at <b>New Game</b> from the chosen board size and active player count.</p>
+
     <p><b>Deck scaling:</b> With 2–3 active players, your personal deck grows so total track supply stays healthy. The game also enforces per-player minimums (7×7: 7/6/3/1; 9×9: 9/8/3/1 for Straight/Elbow/T/Cross). Rotation cards (<b>RS/RE/RT/RC</b>) scale too. Decks are built at <b>New Game</b> from the chosen board size and active player count.</p>
 
     <p class="tip"><i>Tip:</i> While a placement “ghost” is shown, use <b>Q</b>/<b>E</b> to rotate before confirming.</p>
@@ -99,12 +103,19 @@
       <li><b>End Turn</b>.</li>
     </ol>
     <p class="tip"><i>Forced play:</i> If a forced card has <b>no legal placement</b>, the force is <b>waived</b>; you may Bottom it.</p>
+    <h2>AI Players</h2>
+    <ul>
+      <li><b>Path-focused movement:</b> prefers moves that reduce distance to any <i>unreached</i> opponent corner; avoids immediate back-tracking and short loops.</li>
+      <li><b>Rotation-first when stalled:</b> if no progress is possible, the AI prioritizes <b>die rotations</b> and conservatively skips <b>RS/RE/RT/RC</b>, saving them for endgame connections.</li>
+      <li><b>Dual-use awareness:</b> RT behaves like RS/RE — it can rotate an existing <b>T</b> or place a new one.</li>
+      <li><b>Save/Load safe:</b> AI flags and per-turn memory persist in saved games.</li>
+    </ul>
     <h2>Forced Play Rules</h2>
     <ul>
       <li><b>3 Skipped Tracks:</b> If you skip 3 track cards in a row, on your <b>next turn</b> you must <b>Draw and Place</b> the card drawn (if there is a legal placement). Bottom and End Turn are disabled until you place it.</li>
       <li><b>3 Skipped Elbows:</b> If you skip 3 Elbows, the <b>next Elbow you draw must be placed</b> immediately (if there is a legal placement). Bottom and End Turn are disabled until the Elbow is placed.</li>
       <li>If the forced card has <b>no legal placement</b>, the force is <b>waived</b> to avoid deadlocks — you may Bottom it and end your turn normally.</li>
-    </ul>    
+    </ul>
     <h2>Legal Placement &amp; Connections</h2>
     <h3>Track placement</h3>
     <ul>
@@ -145,6 +156,7 @@
       <li><b>Move</b> a token along connected paths to any reachable empty cell (one move per turn).</li>
       <li><b>Score</b> by ending on an opponent’s corner; remove the moving token from the board.</li>
       <li>On <b>3/3</b>, your turn ends immediately; you’re auto-skipped thereafter.</li>
+      <li><b>Pass-through corners:</b> tokens may <b>pass through</b> corners they have already scored, but may <b>not stop</b> on them again.</li>
     </ul>
 
     <h2>Bottoming (Recycle)</h2>

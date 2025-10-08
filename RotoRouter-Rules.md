@@ -99,6 +99,7 @@ _Tip:_ while a placement “ghost” is shown, use **Q/E** to rotate before conf
 - **Move** a token: along connected paths to any reachable empty cell (one move per turn).
 - **Score**: end a move on an **opponent’s corner** → score that corner; the moving token is **removed from the board**.
 - **Finish**: upon **3/3** scored corners, your turn ends immediately and you are auto-skipped thereafter.
+- **Pass-through corners:** tokens may pass through corners they have already scored, but they may not stop on those corners again.
 
 ---
 
@@ -134,15 +135,13 @@ If your own home corner is sealed by perpendicular Straights:
 
 ## Standings & Rankings
 
-- The sidebar now includes a **Standings panel** that lists all **active players** with their **rank, color, name, and score**.
-- Standings remain hidden until the first scoring event.  
-  When a player first scores:
+- The sidebar includes a **Standings panel** listing all **active players** with rank, color, name, and score.
+- Standings remain hidden until the first scoring event. When a player first scores:
   - That player is shown as **1st** (bold),
   - All other active players appear as **2nd**.
-- As the game progresses, standings update automatically and display ties as **T-1st**, **T-2nd**, etc.
-- **Inactive players** are excluded from this list.
-- The **Corners table** now includes a **Place** column that mirrors these standings.
-- Before any score is made, the Place column and top panel are blank.
+- Ties display as **T-1st**, **T-2nd**, etc.
+- **Inactive players** are excluded.
+- The **Corners table** includes a **Place** column that mirrors these standings.
 
 ---
 
@@ -158,3 +157,12 @@ If your own home corner is sealed by perpendicular Straights:
 
 - A “forced” card with **zero legal placements** is **waived** (prevents deadlocks).
 - HUD shows the **actual** token count on-board + removed; if a legacy Undo state causes a mismatch, a ⚠ appears, while illegal extra placements remain blocked.
+
+---
+
+## AI Players
+
+- **Path-focused movement:** prefers moves that reduce Manhattan distance to any _unreached_ opponent corner; avoids immediate back-tracking/short loops.
+- **Stall handling:** when progress stalls, AI prioritizes **die rotations** and conservatively **skips RS/RE/RT/RC**, saving them for endgame connections.
+- **RT parity:** RT behaves like RS/RE (rotate existing T or place a new T).
+- **Save/Load:** AI flags and per-turn memory persist in snapshots.
