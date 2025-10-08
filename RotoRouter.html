@@ -23,6 +23,9 @@
     .legend { display: grid; grid-template-columns: auto 1fr; gap: 6px 10px; align-items: center; }
     .dot { width: 12px; height: 12px; border-radius: 50%; display: inline-block; border: 1px solid #fff4; }
     .inactiveRow { opacity: .4; filter: grayscale(.2); }
+    /* Prevent standings entries from breaking across lines */
+    .standLine { white-space: nowrap; }
+    .standText { margin-left: 6px; }
     canvas { display: block; }
     .toast { position: fixed; left: 380px; bottom: 16px; background: #182031; border: 1px solid #2b3650; padding: 10px 14px; border-radius: 10px; pointer-events: none; opacity: 0; transition: opacity .18s ease; }
     .toast.show { opacity: 1; }
@@ -42,7 +45,10 @@
         <div class="row"><span class="tag" id="turnTag">Turn: —</span><span class="tag" id="phaseTag">Phase: —</span></div>
         <div class="row small muted" id="status">New Game → Draw → Place. First placement is your corner.</div>
       </div>
-
+      <h2>Standings</h2>
+      <div class="panel small" id="standingsPanel">
+        <div id="standingsTop" class="row small"></div>
+      </div>
       <h2>Setup</h2>
       <div class="grid">
         <label class="small muted">Board Size
@@ -133,6 +139,7 @@
         <table class="scoreTable" id="cornerScoreTable" style="width:100%; border-collapse:collapse;">
           <thead>
             <tr>
+              <th style="text-align:left;">Place</th>
               <th style="text-align:left;">Color</th>
               <th style="text-align:left;">Quadrant</th>
               <th style="text-align:right;">Score</th>
@@ -140,21 +147,25 @@
           </thead>
           <tbody>
             <tr data-pid="0">
+              <td id="place-0">—</td>
               <td><span class="dot" style="background:#ff6b6b"></span> Red</td>
               <td id="quad-0">—</td>
               <td id="score-0" style="text-align:right;">0/3</td>
             </tr>
             <tr data-pid="1">
+              <td id="place-1">—</td>
               <td><span class="dot" style="background:#6bff95"></span> Green</td>
               <td id="quad-1">—</td>
               <td id="score-1" style="text-align:right;">0/3</td>
             </tr>
             <tr data-pid="2">
+              <td id="place-2">—</td>
               <td><span class="dot" style="background:#6bd9ff"></span> Blue</td>
               <td id="quad-2">—</td>
               <td id="score-2" style="text-align:right;">0/3</td>
             </tr>
             <tr data-pid="3">
+              <td id="place-3">—</td>
               <td><span class="dot" style="background:#ffef6b"></span> Yellow</td>
               <td id="quad-3">—</td>
               <td id="score-3" style="text-align:right;">0/3</td>
@@ -2458,13 +2469,85 @@ function checkForceElbow(P){
   document.getElementById('undoTurnBtn').addEventListener('click', undoTurn);
   document.getElementById('redoTurnBtn').addEventListener('click', redoTurn);
 
+  function ordinal(n){
+    const s = ["th","st","nd","rd"], v = n % 100;
+    return n + (s[(v-20)%10] || s[v] || s[0]);
+  }
+
+  // Returns [{pid, name, color, score, active}]
+  function collectScores(){
+    return state.players.map(p => {
+      const reachedSet = p.reached
+        ? (Array.isArray(p.reached) ? new Set(p.reached) : p.reached)
+        : new Set();
+      return {
+        pid: p.id,
+        name: p.name,
+        color: p.color,
+        active: !!p.active,
+        score: reachedSet.size|0
+      };
+    });
+  }
+
+  // Sort by score DESC, keep stable by pid
+  function computeStandings(){
+    const rows = collectScores();
+    rows.sort((a,b) => (b.score - a.score) || (a.pid - b.pid));
+    // Assign places with ties (T-1st, T-2nd, etc.)
+    let place = 1;
+    for (let i=0; i<rows.length; i++){
+      if (i>0 && rows[i].score < rows[i-1].score) place = i+1;
+      rows[i].place = place;
+    }
+    // Mark who is tied for 1st (bold all leaders)
+    const topScore = rows.length ? rows[0].score : 0;
+    rows.forEach(r => { r.isLeader = (r.score === topScore && topScore > 0) || (r.place === 1 && topScore === 0); });
+    return rows;
+  }
+
+  function renderStandingsTop(){
+    const el = document.getElementById('standingsTop');
+    if (!el) return;
+
+    // Compute standings and filter to ACTIVE players only
+    const rowsAll = computeStandings();
+    const rows = rowsAll.filter(r => r.active);
+
+    // Do we have any score on the board yet?
+    const anyScore = rowsAll.some(r => r.score > 0);
+
+    const parts = rows.map(r => {
+      const baseTitle = `${r.name} (${r.score}/3)`;
+      const dot = `<span class="dot" style="background:${r.color}"></span>`;
+
+      let display = baseTitle;
+      if (anyScore) {
+        const samePlaceCount = rowsAll.filter(x => x.place === r.place && x.active).length;
+        const label = (samePlaceCount > 1) ? `T-${ordinal(r.place)}` : ordinal(r.place);
+        display = `${label}: ${baseTitle}`;
+      }
+
+      // Build the line as a single, non-wrapping unit
+      const content = `<span class="standText">${display}</span>`;
+      if (anyScore && r.place === 1) {
+        // Bold leaders after scoring starts
+        return `<div class="standLine"><b>${dot}${content}</b></div>`;
+      } else {
+        return `<div class="standLine">${dot}${content}</div>`;
+      }
+    });
+
+    // One entry per line (no separators), each line is non-wrapping
+    el.innerHTML = parts.join('');
+  }
+
   function renderCornerScoreTable(){
     const tb = document.querySelector('#cornerScoreTable tbody');
     if (!tb || !state || !state.players) return;
 
     const N = state.N;
 
-    // Map pocket -> text with coordinates based on current board size
     const quadText = (pocket) => {
       switch (pocket) {
         case 'NW': return 'NW (0,0)';
@@ -2475,28 +2558,63 @@ function checkForceElbow(P){
       }
     };
 
+    // Compute standings once
+    const standings = computeStandings();
+    const byPid = new Map(standings.map(r => [r.pid, r]));
+
+    // NEW: detect if any score exists yet (game-wide)
+    const anyScore = standings.some(r => r.score > 0);
+
     for (const p of state.players) {
       const pid = p.id;
       const tr  = tb.querySelector(`tr[data-pid="${pid}"]`);
-      if (tr) {
-        tr.classList.toggle('inactiveRow', !p.active);
-      }      
-      // reached is stored as Set of player names (e.g., 'Red', 'Green')
+      if (tr) tr.classList.toggle('inactiveRow', !p.active);
+
+      // Build score string from this player's reached set
       const reachedSet = p.reached
         ? (Array.isArray(p.reached) ? new Set(p.reached) : p.reached)
         : new Set();
-
-      // Show same bracket letters as the top Score tag: [R, G, ...]
       const letters = reachedSet.size
         ? Array.from(reachedSet).map(n => String(n)[0]).join(', ')
         : '';
-
       const scoreStr = `${reachedSet.size}/3${letters ? ` [${letters}]` : ''}`;
 
-      const qEl = document.getElementById(`quad-${pid}`);
-      const sEl = document.getElementById(`score-${pid}`);
-      if (qEl) qEl.textContent = quadText(p.pocket) + (p.active ? '' : ' (inactive)');
+      const qEl  = document.getElementById(`quad-${pid}`);
+      const sEl  = document.getElementById(`score-${pid}`);
+      const plEl = document.getElementById(`place-${pid}`);
+
+      if (qEl) qEl.textContent = (p.pocket ? (() => {
+        switch (p.pocket) {
+          case 'NW': return 'NW (0,0)';
+          case 'NE': return `NE (${N-1},0)`;
+          case 'SE': return `SE (${N-1},${N-1})`;
+          case 'SW': return `SW (0,${N-1})`;
+          default:   return p.pocket;
+        }
+      })() : '—') + (p.active ? '' : ' (inactive)');
+
       if (sEl) sEl.textContent = p.active ? scoreStr : '—';
+
+      if (plEl) {
+        const row = byPid.get(pid);
+
+        if (!p.active) {
+          // Inactive players: no place shown
+          plEl.textContent = '—';
+          plEl.style.fontWeight = '';
+        } else if (!anyScore) {
+          // Before first score anywhere: hide places
+          plEl.textContent = '—';
+          plEl.style.fontWeight = '';
+        } else if (row) {
+          // After first score: show ordinals (ties get T- prefix)
+          const samePlaceCount = standings.filter(r => r.place === row.place && r.active).length;
+          const label = (samePlaceCount > 1) ? `T-${ordinal(row.place)}` : ordinal(row.place);
+          plEl.textContent = label;
+          // Bold leaders (1st place)
+          plEl.style.fontWeight = (row.place === 1) ? '700' : '';
+        }
+      }
     }
   }
 
@@ -2551,12 +2669,14 @@ function checkForceElbow(P){
       ['drawBtn','placeBtn','bottomBtn','tokenBtn','rollBtn','applyBtn','endTurnBtn','undoGlobalBtn','redoGlobalBtn','undoTurnBtn','redoTurnBtn']
         .forEach(id => { const b = document.getElementById(id); if (b) b.disabled = true; });
       renderCornerScoreTable();
+      renderStandingsTop();
       render();
       updateUndoButtons();
       return;
     }
 
     renderCornerScoreTable();
+    renderStandingsTop();
 
     const P=currentPlayer();
 

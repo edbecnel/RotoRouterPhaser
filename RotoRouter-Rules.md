@@ -123,6 +123,20 @@ If your own home corner is sealed by perpendicular Straights:
 
 ---
 
+## Standings & Rankings
+
+- The sidebar now includes a **Standings panel** that lists all **active players** with their **rank, color, name, and score**.
+- Standings remain hidden until the first scoring event.  
+  When a player first scores:
+  - That player is shown as **1st** (bold),
+  - All other active players appear as **2nd**.
+- As the game progresses, standings update automatically and display ties as **T-1st**, **T-2nd**, etc.
+- **Inactive players** are excluded from this list.
+- The **Corners table** now includes a **Place** column that mirrors these standings.
+- Before any score is made, the Place column and top panel are blank.
+
+---
+
 ## Ending the Game
 
 - When all remaining players are finished/out, the game ends and shows:  

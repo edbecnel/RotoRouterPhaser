@@ -356,6 +356,22 @@ If you Bottom it, your Draw state is set to **Used** — you must wait for your 
   _“Rotating (type): use ⟲/⟳ or Q/E to rotate; click again or press ‘Confirm’ to apply.”_  
   for consistent touch and keyboard guidance.
 
+### 41) Standings Display and Dynamic Player Rankings
+
+- Added a **Standings panel** at the top of the sidebar showing the **current ranking** of all **active players**.
+- The display includes each player’s **standing** (1st, 2nd, 3rd, 4th), **color swatch**, **name**, and **score**, all on a single line.
+- **Inactive players** are **not shown** in this panel.
+- **Before the first scoring event**, standings remain hidden (no ranks shown).  
+  Once any player reaches an opponent’s corner:
+  - That player is labeled **1st** (bold).
+  - All other active players are labeled **2nd**.
+- After subsequent scores, standings automatically update and display ties as **T-1st**, **T-2nd**, etc.
+- In the **Corners table**, a new **Place** column shows each player’s rank, using the same tie and bold-leader logic.
+- The rank column and top standings remain blank until the first token scores.
+- Visual cleanup:
+  - Standings entries now use `white-space: nowrap` to prevent line breaks between color, name, and score.
+  - Removed trailing separators (no “·” symbols).
+
 ---
 
 ## Updated Deck (with T/RT) — supersedes older counts
