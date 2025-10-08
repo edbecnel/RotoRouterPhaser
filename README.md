@@ -372,6 +372,20 @@ If you Bottom it, your Draw state is set to **Used** — you must wait for your 
   - Standings entries now use `white-space: nowrap` to prevent line breaks between color, name, and score.
   - Removed trailing separators (no “·” symbols).
 
+### 42) Deck scaling with active players
+
+- RotoRouter now scales each player’s personal draw deck based on how many players are active:
+
+- Fewer players → more cards per player.
+- Minimum connectivity guarantees ensure enough Straights/Elbows/Ts/Crosses to reach opponents, even with 2–3 players.
+
+**Minimums (per player):**
+
+- 7×7: Straight 7, Elbow 6, T 3, Cross 1
+- 9×9: Straight 9, Elbow 8, T 3, Cross 1
+
+- Rotation/Replacement (RS/RE/RT/RC) scale with the deck too. Decks are created at **New Game** using the selected board size and active player count.
+
 ---
 
 ## Updated Deck (with T/RT) — supersedes older counts

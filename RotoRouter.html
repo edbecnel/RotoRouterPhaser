@@ -296,31 +296,74 @@ function loadSetupFromStorage(){
   
   // Utilities & state
   function shuffle(a){ for(let i=a.length-1;i>0;i--){ const j=Math.floor(Math.random()*(i+1)); [a[i],a[j]]=[a[j],a[i]]; } return a; }
-  function makeDeck(size){
-    const cfgMap = {
-      // 7×7
+  
+  function makeDeck(size, activeCount=4){
+    // Baseline deck per player tuned for a 4-player table (your current numbers)
+    const baseBySize = {
       7: { Straight:7,  Elbow:6,  Cross:1,  T:3,
           RStraight:3, RElbow:2, RCross:1, RT:1 },
-      // 9×9
       9: { Straight:9,  Elbow:8,  Cross:1,  T:3,
           RStraight:4, RElbow:3, RCross:2, RT:2 },
     };
-    const cfg = cfgMap[size] || (size <= 7 ? cfgMap[7] : cfgMap[9]);
+    const base = baseBySize[size] || (size <= 7 ? baseBySize[7] : baseBySize[9]);
+
+    // Scale so that total track across the table ≈ constant vs 4-player baseline.
+    // Example: 2 players => per-player deck ~ 2× the 4P baseline.
+    const scale = 4 / Math.max(1, activeCount);
+    const round = (n) => Math.max(0, Math.round(n));
+
+    // Start with a simple proportional scale
+    const cfg = {
+      Straight:  round(base.Straight  * scale),
+      Elbow:     round(base.Elbow     * scale),
+      Cross:     round(base.Cross     * scale),
+      T:         round(base.T         * scale),
+      RStraight: round(base.RStraight * scale),
+      RElbow:    round(base.RElbow    * scale),
+      RCross:    round(base.RCross    * scale),
+      RT:        round(base.RT        * scale),
+    };
+
+    // Connectivity minimums per player, by board size (conservative but small):
+    // Ensures enough "spanners" to bridge axes and turn corners when player count is low.
+    const minBySize = (sz) => (sz <= 7
+      ? { Straight: 7, Elbow: 6, T: 3, Cross: 1 }   // roughly your 7×7 baseline mins
+      : { Straight: 9, Elbow: 8, T: 3, Cross: 1 }   // roughly your 9×9 baseline mins
+    );
+    const mins = minBySize(size);
+
+    // Apply minimums only upward (never reduce scaled values)
+    cfg.Straight = Math.max(cfg.Straight, mins.Straight);
+    cfg.Elbow    = Math.max(cfg.Elbow,    mins.Elbow);
+    cfg.T        = Math.max(cfg.T,        mins.T);
+    cfg.Cross    = Math.max(cfg.Cross,    mins.Cross);
+    // console.log("cfg.Straight = " + cfg.Straight);
+    // console.log("cfg.Elbow = " + cfg.Elbow);
+    // console.log("cfg.T = " + cfg.T);
+    // console.log("cfg.Cross = " + cfg.Cross);
+
+    // Construct the deck
+    const TrackCard = {
+      Straight:'Straight', Elbow:'Elbow', Cross:'Cross', T:'T',
+      RStraight:'RS', RElbow:'RE', RCross:'RC', RT:'RT'
+    };
+
     return {
       draw: shuffle([
-        ...Array(cfg.Straight||0).fill(TrackCard.Straight),
-        ...Array(cfg.Elbow||0).fill(TrackCard.Elbow),
-        ...Array(cfg.Cross||0).fill(TrackCard.Cross),
-        ...Array(cfg.T||0).fill(TrackCard.T),
+        ...Array(cfg.Straight).fill(TrackCard.Straight),
+        ...Array(cfg.Elbow).fill(TrackCard.Elbow),
+        ...Array(cfg.Cross).fill(TrackCard.Cross),
+        ...Array(cfg.T).fill(TrackCard.T),
 
-        ...Array(cfg.RStraight||0).fill(TrackCard.RStraight),
-        ...Array(cfg.RElbow||0).fill(TrackCard.RElbow),
-        ...Array(cfg.RCross||0).fill(TrackCard.RCross),
-        ...Array(cfg.RT||0).fill(TrackCard.RT),
+        ...Array(cfg.RStraight).fill(TrackCard.RStraight),
+        ...Array(cfg.RElbow).fill(TrackCard.RElbow),
+        ...Array(cfg.RCross).fill(TrackCard.RCross),
+        ...Array(cfg.RT).fill(TrackCard.RT),
       ]),
       discard: []
     };
   }
+
   function makeBoard(N){ const b=[]; for(let y=0;y<N;y++){ const r=[]; for(let x=0;x<N;x++){ r.push({track:null,rot:0,owner:null,token:null}); } b.push(r);} return b; }
   function initGearOffsets(N){
     state.gearOffset = Array.from({length:N}, () => Array(N).fill(0));
@@ -1033,14 +1076,22 @@ function cornerFor(pid){
 
   // Game flow
   function newGame(){
-  // Use the in-game dropdown as the source of truth.
-  const uiSize = parseInt(UI.boardSize().value, 10) || 9;
-  state.N = uiSize;
-  // Keep the saved setup aligned with the in-game choice (so Main Menu and reloads match).
-  state.setup = state.setup || {};
-  state.setup.boardSize = uiSize;
-  try { localStorage.setItem('rr.setup', JSON.stringify(state.setup)); } catch {}    state.board = makeBoard(state.N);
-    initGearOffsets(state.N); // <- add this
+    // Use the in-game dropdown as the source of truth.
+    const uiSize = parseInt(UI.boardSize().value, 10) || 9;
+    state.N = uiSize;
+    // Keep the saved setup aligned with the in-game choice (so Main Menu and reloads match).
+    state.setup = state.setup || {};
+    state.setup.boardSize = uiSize;
+    try { localStorage.setItem('rr.setup', JSON.stringify(state.setup)); } catch {}
+    state.board = makeBoard(state.N);
+    initGearOffsets(state.N);
+
+    // Determine # of active players from setup (defaults keep Red/Green active)
+    const plannedPlayers = (state.setup?.players && Array.isArray(state.setup.players))
+      ? state.setup.players
+      : PLAYERS.map((_, i) => ({ active: i < 2 }));
+    const activeCount = plannedPlayers.filter(p => p && p.active).length || 1;    
+
     state.players = PLAYERS.map(p=>{
       const cfg = (state.setup?.players && state.setup.players[p.id]) || { name:p.name, ai:false, active:(p.id<2) };
       return {
@@ -1050,7 +1101,7 @@ function cornerFor(pid){
         pocket: p.pocket,
         ai: !!cfg.ai,
         active: !!cfg.active,
-        deck: makeDeck(state.N),
+        deck: makeDeck(state.N, activeCount),  // ← pass active count here
         drawn:null, tokens:0, tokensRemoved:0,
         drawLocked:false, drawUsed:false, tokenUsed:false, rollUsed:false,
         skipCount: 0, elbowSkipCount: 0, forceElbow: false, forcePlaceNext: false

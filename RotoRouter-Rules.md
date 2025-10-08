@@ -29,6 +29,15 @@ Be the first to **score 3 corners** by moving your tokens onto _three different 
 - **T (┴)** — 3 exits (base N, E, W; closed S)
 - **Cross (┼)** — 4 exits (N, S, E, W)
 
+#### Deck scaling (by active players)
+
+Per-player decks scale up when fewer than four players are active so there are enough tracks to build routes. After scaling, the game enforces per-player minimums:
+
+- **7×7:** Straight 7, Elbow 6, T 3, Cross 1
+- **9×9:** Straight 9, Elbow 8, T 3, Cross 1
+
+RS/RE/RT/RC scale with the deck as well. Decks are generated at **New Game** using board size and the number of active players.
+
 ### Rotation & Replacement cards (dual-use)
 
 > These cards can either **act on existing tiles** _or_ be **used to place new tracks** just like their normal counterparts.
