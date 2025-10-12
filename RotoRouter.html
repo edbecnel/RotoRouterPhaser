@@ -191,7 +191,6 @@
     <main id="game"><canvas id="board"></canvas></main>
   </div>
   <div id="toast" class="toast"></div>
-
 <script>
 
 function loadSetupFromStorage(){
@@ -211,7 +210,7 @@ function loadSetupFromStorage(){
   } catch(e){ console.warn('setup load failed', e); return null; }
 }
 
-  (function(){
+(function(){
   // Toast with adjustable duration (defaults to ~3.5s) and proper clearing
   let _toastTimer=null;
   const toast=(m, ms=3500)=>{
@@ -220,7 +219,9 @@ function loadSetupFromStorage(){
     el.classList.add('show');
     if(_toastTimer) clearTimeout(_toastTimer);
     _toastTimer=setTimeout(()=>el.classList.remove('show'), ms);
-  };  
+  };
+  const aiSleepTime = 200;
+  const aiSleepTime2 = 300;
   const setStatus=(t)=>{ document.getElementById('status').innerHTML=t; };
   const tag = (id)=>document.getElementById(id);
   const turnTag=()=>tag('turnTag');
@@ -232,7 +233,16 @@ function loadSetupFromStorage(){
   const tokenTag=()=>tag('tokenTag');
   const tokenCount=()=>tag('tokenCount');
   const btn=(id)=>document.getElementById(id);
-  
+  // Keep “Skipped” HUD tags in sync with the current player's counters
+  function refreshSkipTags(){
+    const P = currentPlayer && currentPlayer();
+    if (!P) return;
+    const s = document.getElementById('skippedTag');
+    const e = document.getElementById('elbowSkippedTag');
+    if (s) s.textContent = `Skipped: ${P.skipCount|0}/3`;
+    if (e) e.textContent = `Elbows Skipped: ${P.elbowSkipCount|0}/3`;
+  }
+ 
 
   // Colors & constants
   const COLORS={ bg:'#0b0f18', grid:'#263145', gear:'#202a3d', track:'#6d7aa6', block:'#434b63', slot:'#a8b7ff', hilite:'#9efff4', tokenR:'#ff6b6b', tokenG:'#6bff95', tokenB:'#6bd9ff', tokenY:'#ffef6b', edge:'#f4b86a', hint:'#c7f0ff' };
@@ -434,6 +444,37 @@ function loadSetupFromStorage(){
     return inward;
   }
 
+  // Heuristic: local “rotation leverage” if a nearby Elbow/Straight could be turned
+  // to add a new reciprocal or aim us toward a target corner in one 90° rotation.
+  function aiRotationLeverageAt(x, y, pid, target){
+    let bonus = 0;
+    const dirs = [[1,0],[-1,0],[0,1],[0,-1]];
+    for (const [dx,dy] of dirs){
+      const nx = x + dx, ny = y + dy;
+      if (!within(nx,ny)) continue;
+      const nb = state.board[ny][nx];
+      if (!nb || !nb.track) continue;
+      if (nb.track !== 'Elbow' && nb.track !== 'Straight') continue;
+
+      const baseRot = snap90(nb.rot);
+      let improves = false;
+      let aimsBetter = false;
+      for (const R of [0,90,180,270]){
+        if (R === baseRot) continue;
+        // New reciprocal possibility into (x,y)?
+        const opens = rotatedOpeningsType(nb.track, R);
+        if (opens.some(([odx,ody]) => nx+odx===x && ny+ody===y)) improves = true;
+        // Turn neighbor to face toward the target?
+        const vx = Math.sign(target.x - nx), vy = Math.sign(target.y - ny);
+        if (opens.some(([odx,ody]) => odx===vx && ody===vy)) aimsBetter = true;
+        if (improves && aimsBetter) break;
+      }
+      if (improves)   bonus += 2;
+      if (aimsBetter) bonus += 1;
+    }
+    return bonus; // typical 0..3
+  }
+
   // First placement detector for the given player (no owned tracks and no corner-connected net).
   function aiIsFirstPlacement(pid){
     const myOwned = owned(pid);
@@ -491,22 +532,32 @@ function loadSetupFromStorage(){
     const P = state.players[pid];
     if (!P || !P.drawn || !targets.length) return null;
 
+    // Normalize the drawn card to its base track type (e.g., RS → Straight)
     const card = P.drawn;
+    const baseType = baseDrawnType(card);
+    const firstPlace = aiIsFirstPlacement(pid);
+    const myCorner  = cornerFor(pid);
 
-    const baseType = (function(c){
-      switch(c){
-        case TrackCard.RStraight: return 'Straight';
-        case TrackCard.RElbow:    return 'Elbow';
-        case TrackCard.RT:        return 'T';
-        case TrackCard.RCross:    return 'Cross';
-        default:                  return c;
+    // Build a set of cells that admit at least ONE fully reciprocal rotation.
+    // (We only keep the cell; the specific rot is re-tested below.)
+    const legalCells = new Map(); // key "x,y" -> {x,y}
+    for (const t of targets){
+      for (const R of [0,90,180,270]){
+        if (!aiIsReciprocalAt(baseType, R, t.x, t.y)) continue;
+        const br = aiAttachmentBreakdown(baseType, R, t.x, t.y, pid);
+        // Require at least one *friendly* attachment, except the first-at-corner seed.
+        if (br.friendly > 0 || (firstPlace && t.x===myCorner.x && t.y===myCorner.y)) {
+          legalCells.set(`${t.x},${t.y}`, { x: t.x, y: t.y });
+          break;
+        }
       }
-    })(card);
+    }
+    const legal = Array.from(legalCells.values());
+    if (legal.length === 0) return null;
 
     const N = state.N;
     const center = { x: (N-1)/2, y: (N-1)/2 };
 
-    const firstPlace = aiIsFirstPlacement(pid);
     // Relax off-board penalty on very first placement for non-Elbows
     const firstPlacementRelax = firstPlace && (baseType !== 'Elbow');
 
@@ -514,7 +565,7 @@ function loadSetupFromStorage(){
     // Track best overall AND best that *connects* (degree>0)
     let best = null;
     let bestConn = null;
-    for (const t of targets){
+    for (const t of legal){
       for (const rot of [0,90,180,270]){
         // Primary score: reciprocal connections to neighbors
         let degree = 0;
@@ -583,14 +634,16 @@ function loadSetupFromStorage(){
       if (degree > 0 && (!bestConn || score > bestConn.score)) bestConn = cand;
       }
     }
-    // Prefer a placement that *attaches* (degree > 0) if one exists
-    let pick = bestConn || best;
 
-    // Special rule: if this is an Elbow and NONE of the legal rotations attach,
-    // bottom it instead of planting a lonely elbow.
-    if (pick && baseType === 'Elbow' && !bestConn) {
-      return null;   // signal "no good placement" → AI will Bottom
-    }
+    // Enforce attachment: if nothing attaches, only allow the special
+    // "first placement at own corner" case; otherwise bottom.
+    let pick = bestConn;
+    if (!pick && firstPlace && best && best.x===myCorner.x && best.y===myCorner.y) {
+      pick = best; // allow initial corner seed even if degree==0
+    }    
+    
+    // If still no attaching option (and not the special first-corner case), bottom.
+    if (!pick) return null;
 
     // For non-Elbow *first* placements: always place the best legal option.
     // (Avoids skipping a perfectly fine T/S/Cross at the corner.)
@@ -636,6 +689,90 @@ function loadSetupFromStorage(){
     render();
   }
 
+  // --- Dev-only finite-value assertion ---------------------------------------
+  // Off by default. Enable from console:  window.RR_DEV_ASSERTS = true
+  // or set state.debugAsserts = true at runtime.
+  function __devAssertFinite(label, ...nums){
+    try {
+      const on = (typeof window !== 'undefined' && window.RR_DEV_ASSERTS) || (state && state.debugAsserts);
+      if (!on) return;
+      for (let i=0;i<nums.length;i++){
+        const v = nums[i];
+        if (!Number.isFinite(v)){
+          // Make it noisy in dev, but don’t brick production
+          console.warn(`[DEV ASSERT] ${label}: non-finite value at index ${i}`, { value:v, nums, stack:(new Error()).stack });
+          throw new Error(`[DEV ASSERT] ${label}: non-finite`);
+        }
+      }
+    } catch(e){
+      // Swallow if desired; rethrow to halt AI if you prefer stricter dev behavior.
+      // throw e;
+    }
+  }
+
+  // ... other AI helpers above ...
+
+  // Count reciprocal attachments the new piece would make at (x,y,rot)
+  function aiDegreeIfPlaced(type, rot, x, y){
+    let degree = 0;
+    const opens = rotatedOpeningsType(type, rot);
+    for (const [dx,dy] of opens){
+      const nx = x+dx, ny = y+dy;
+      if (!within(nx,ny)) continue;
+      const n = state.board[ny][nx];
+      if (!n || !n.track) continue;
+      if (hasReciprocalTypes(type, rot, n.track, n.rot, dx, dy)) degree++;
+    }
+    return degree;
+  }
+
+  // Fallback: use the same legality that the UI uses (highlights) and
+  // pick the first legal target; rotation is arbitrary for legality.
+  function aiFirstLegalPlacementForDrawn(pid){
+    const P = currentPlayer();
+    if (!P || !P.drawn) return null;
+    const targets = aiListLegalTargets(pid);
+    if (!targets || targets.length === 0) return null;
+    // Choose the first target that has at least one reciprocal rotation
+    for (const t of targets){
+      for (const R of [0,90,180,270]){
+        if (aiIsReciprocalAt(baseDrawnType(P.drawn), R, t.x, t.y)) {
+          return { at:{ x: t.x, y: t.y }, rot: R };
+        }
+      }
+    }
+    return null;
+  }
+
+  // AI-only: check that a new placement at (x,y,rot) would be fully reciprocal
+  // with all adjacent tracks (no dangling half-connections against neighbors).
+  function aiIsReciprocalAt(track, rot, x, y){
+    if (!within(x,y)) return false;
+    // Our openings at this rotation
+    const ours = rotatedOpeningsType(track, snap90(rot)); // e.g., [[1,0],[-1,0]...]
+    const needBack = new Set(ours.map(([dx,dy]) => `${dx},${dy}`));
+    // Check 4 neighbors
+    const dirs = [[1,0],[-1,0],[0,1],[0,-1]];
+    for (const [dx,dy] of dirs){
+      const nx = x+dx, ny = y+dy;
+      if (!within(nx,ny)) continue;
+      const nb = state.board[ny][nx];
+      if (!nb || !nb.track) continue;
+      // Neighbor openings
+      const nbOpens = rotatedOpeningsType(nb.track, snap90(nb.rot));
+      const nbSet = new Set(nbOpens.map(([odx,ody]) => `${odx},${ody}`));
+      // If we open toward neighbor, neighbor must open back toward us
+      if (needBack.has(`${dx},${dy}`)){
+        if (!nbSet.has(`${-dx},${-dy}`)) return false;
+      }
+      // If neighbor opens toward us, we must open back toward neighbor
+      if (nbSet.has(`${-dx},${-dy}`)){
+        if (!needBack.has(`${dx},${dy}`)) return false;
+      }
+    }
+    return true;
+  }
+
   // Token: find a scoring move if one exists; else step closer to any opponent corner
   function aiChooseTokenAction(pid){
     // First look for any token with a path to a scoring corner
@@ -667,20 +804,34 @@ function loadSetupFromStorage(){
 
       // 2) Otherwise, pick a move that *progresses* toward any un-reached corner.
       //    Prefer strictly closer moves; if none exist, allow equal-distance but avoid bouncing back.
-      const d0 = Math.min(...targetCorners.map(oc => manhattan(t, oc)));
-
-      const lastKey = state.aiLastHop?.get(pid) || null;   // remember last landing
-      best = null; // instead of let best = null;
-      let bestScore = +Infinity;
-
+       // Build corner targets with emphasis on the player's *unreached* corners.
+      // If only one unreached corner remains, call it the "last" and give it higher weight.
+      const allOCs = opponentCorners(pid);
+      const reachedSet = (P.reached instanceof Set ? P.reached : (P.reached ? new Set(P.reached) : new Set()));
+      const unreachedOCs = allOCs.filter(oc => {
+        const name = PLAYERS.find(p => cornerFor(p.id).x===oc.x && cornerFor(p.id).y===oc.y)?.name;
+        return !reachedSet.has(name);
+      });
+      const lastTarget = (unreachedOCs.length === 1) ? unreachedOCs[0] : null;
+      const targets = unreachedOCs.length ? unreachedOCs : allOCs;
+      const d0 = Math.min(...targets.map(oc => manhattan(t, oc)));
+      __devAssertFinite('ai.tokenTargeting.d0', d0);
+      const lastKey = state.aiLastHop?.get(pid) || null;
+      let bestScore = Infinity;
       for (const m of moves) {
-        const d  = Math.min(...targetCorners.map(oc => manhattan(m, oc)));
+        const dNear = Math.min(...targets.map(oc => manhattan(m, oc)));
+        const dLast = lastTarget ? manhattan(m, lastTarget) : dNear;
+        const leverage = aiRotationLeverageAt(
+          m.x, m.y, pid, lastTarget || targets[0]
+        );
         const mk = `${m.x},${m.y}`;
-
-      // Prefer strictly closer; allow equal-distance only if not bouncing back or revisiting
-      if (d < d0 || (d === d0 && mk !== lastKey && !state.aiVisitedThisTurn.has(mk))) {
-        if (d < bestScore) { bestScore = d; best = m; }
-        }
+        // Lower score is better: distance minus a small leverage bonus.
+        const score = (lastTarget ? dLast * 1.25 : dNear) - 0.5 * leverage;
+        __devAssertFinite('ai.tokenTargeting.loop', dNear, dLast, leverage, score);
+        const isAcceptable =
+          (dNear < d0) ||
+          (dNear === d0 && mk !== lastKey && !state.aiVisitedThisTurn.has(mk));
+        if (isAcceptable && score < bestScore) { bestScore = score; best = m; }
       }
 
       if (best) return { type:'move', from:t, to:best };
@@ -693,8 +844,8 @@ function loadSetupFromStorage(){
     const reached = P.reached ? (P.reached instanceof Set ? P.reached.size : new Set(P.reached).size) : 0;
     const lifetimePlaced = Math.min(TOKENS_MAX, (P.tokensRemoved|0) + onBoard);
     const canPlaceNew = (lifetimePlaced < TOKENS_MAX) && cCell.track && cCell.token==null;
-    if (canPlaceNew && onBoard === 0) return { type:'place', at: corner };
-
+    // Prefer to ramp to at least 2 tokens on board when the corner is free
+    if (canPlaceNew && onBoard < 2) return { type:'place', at: corner };
     // Otherwise, pick any token that can move and step closer to the nearest opponent corner
     best = null;  // reset from the earlier loop to avoid stale value
     for (const t of myTokens){
@@ -809,6 +960,9 @@ function loadSetupFromStorage(){
   };
 
   const state={ N:9, cell:64, pad:20, board:makeBoard(9),
+    // AI turn coordination
+    aiBusy:false,           // prevents re-entrancy (double actions)
+    aiTimer:null,           // pending setTimeout handle for AI turn    
     players:PLAYERS.map(p=>({...p, deck:makeDeck(), drawn:null, tokens:0, tokensRemoved:0, drawLocked:false, drawUsed:false, tokenUsed:false, rollUsed:false, skipCount: 0, elbowSkipCount: 0, forceElbow: false, active:true })),    cornerLockTurns: PLAYERS.map(()=>0),
     current:0, phase:'idle', subphase:null, highlight:[], hover:null, forcePlace:false, previewRot:0, die:null, tokenSelect:null,
     turnAdvancing:false,
@@ -1094,6 +1248,9 @@ function loadSetupFromStorage(){
     if (!snap || typeof snap !== 'object' || snap.__rr_version == null) {
       throw new Error('Not a valid RotoRouter save file.');
     }
+    // Cancel any pending AI turn from a previous state (prevents double-execution after Undo/Redo)
+    if (state.aiTimer) { try { clearTimeout(state.aiTimer); } catch(e) {} state.aiTimer = null; }
+    state.aiBusy = false;    
     if (!Number.isInteger(snap.N) || !Array.isArray(snap.board) || !Array.isArray(snap.players)) {
       throw new Error('Save is missing required fields.');
     }
@@ -1169,14 +1326,15 @@ function loadSetupFromStorage(){
         reached: new Set(from.reached || []),
       };
     });
-    // --- Waive any stale forces and reset skip counters after load ---
-    // (Prevents saved 3/3 warnings and forced-elbow locks from carrying into a resumed game.)
-    state.forcePlace = false;
-    state.forceElbowFor = null;
-    state.players.forEach(p => {
-      p.skipCount = 0;
-      p.elbowSkipCount = 0;
-    });
+    // --- Waive forces/reset counters ONLY on real file load, NOT on Undo/Redo ---
+    if (!opts || !opts.fromHistory) {
+      state.forcePlace = false;
+      state.forceElbowFor = null;
+      state.players.forEach(p => {
+        p.skipCount = 0;
+        p.elbowSkipCount = 0;
+      });
+    }
 
     // AI per-turn/transient memory should start clean after a load
     state.aiVisitedThisTurn = new Set();
@@ -1242,7 +1400,10 @@ function loadSetupFromStorage(){
     state.subphase = null;
     state.highlight = [];
     state.hover = null;
-    state.forcePlace = false;
+    // Preserve/restore force rules on Undo/Redo; only clear on real file loads.
+    if (!opts || !opts.fromHistory) {
+      state.forcePlace = false;
+    }
     state.previewRot = 0;
     state.die = null;
     state.tokenSelect = null;
@@ -1264,6 +1425,14 @@ function loadSetupFromStorage(){
     // Resize canvas for the (possibly) new N and redraw
     resize();
     updateHUD();
+    // If this came from history, re-open the short activation window and re-check force.
+    if (opts && opts.fromHistory) {
+      state._enforceForcePlaceWindow = true;
+      checkForcePlace();
+      state._enforceForcePlaceWindow = false;
+      updateHUD();
+    }
+
 
     if (opts && opts.fromHistory) {
       // After UNDO/REDO, re-enter fix phases (Corner Fix then Dead-Straight Fix) if eligible
@@ -1558,22 +1727,78 @@ function loadSetupFromStorage(){
 
   // ======== AI turn driver ========
   async function aiTakeTurn(){
+    // Re-entry guard: prevent double actions (especially after Undo/Redo)
+    if (state.aiBusy) return;
+    state.aiBusy = true;
+    // This AI turn is now "owned"; clear the pending timer handle.
+    if (state.aiTimer) { try { clearTimeout(state.aiTimer); } catch(e) {} state.aiTimer = null; }
+    
     const P = currentPlayer();
+
+    // --- Forced placement turn handling (prevents AI deadlock at 3/3) ---
+    if (state.forcePlace && P && P.ai) {
+      // 1) Ensure we have a drawn card
+      if (!P.drawn) { drawCard(); await sleep(aiSleepTime2); render(); updateHUD(); }
+      // 2) If we can place NOW, do it (prefer heuristic; fall back to first legal)
+      if (P.drawn && canPlaceDrawnNow(P.id)) {
+        // Compute legal targets *now* and pass them into the heuristic
+        const targetsNow = aiListLegalTargets(P.id);
+        const heur = (typeof aiBestPlacementForDrawn === 'function'
+                      ? aiBestPlacementForDrawn(P.id, targetsNow)
+                      : null);
+        const fb   = aiFirstLegalPlacementForDrawn(P.id);
+        // Normalize to a single {x,y,rot} shape
+        const pick = heur ? { x: heur.x, y: heur.y, rot: heur.rot }
+                          : (fb ? { x: fb.at.x, y: fb.at.y, rot: fb.rot } : null);
+        if (pick) {
+          // Use the same commit path used elsewhere:
+          // placeMode() → set rotateNew focus/rot → placeMode() again to commit.
+          placeMode(); // compute highlights
+          state.phase = 'place';
+          state.subphase = 'rotateNew';
+          state.rotateFocus = { x: pick.x, y: pick.y, original: 0 };
+          state.previewRot  = pick.rot|0;
+          render();
+          await sleep(aiSleepTime);
+          // Safety: re-check with base type (handles RT/RE/RS normalization).
+          const baseType = baseDrawnType(P.drawn);
+          if (aiIsReciprocalAt(baseType, pick.rot, pick.x, pick.y)) {
+            placeMode(); // confirm placement via rotateNew path
+          } else {
+            bottomCard(); // conditions changed → don’t force a bad placement
+          }          
+          await sleep(aiSleepTime);
+          // placed
+          render(); updateHUD(); refreshSkipTags && refreshSkipTags();
+          // Finish the turn normally
+          endTurn(); state.aiBusy = false; return;
+        }                          
+      }
+      // 3) If placement truly impossible, *waive* the force to avoid deadlock
+      //    (Rules note: you already waive force when impossible for humans)
+      if (!P.drawn || !canPlaceDrawnNow(P.id)) {
+        state.forcePlace = false;
+        P.skipCount = 0;
+        setStatus('Forced placement waived (no legal placement available).');
+        toast && toast('Force waived: no legal placement');
+        // Continue with the rest of the AI turn as a normal (non-forced) turn
+      }
+    }
 
     // --- Handle AI stall recovery -----------------------------------------
     if (P._aiStalledTurns && P._aiStalledTurns >= 3) {
       // After 3 non-progress turns, try card cycling
       if (P.drawn && P.deck.draw.length > 0) {
         bottomCard();
-        await sleep(200);
+        await sleep(aiSleepTime);
         drawCard();
-        await sleep(200);
+        await sleep(aiSleepTime);
       }
       // Also, always roll the die for a new rotation opportunity
       rollDie();
-      await sleep(300);
+      await sleep(aiSleepTime2);
       applyRotation();
-      await sleep(300);
+      await sleep(aiSleepTime2);
       P._aiStalledTurns = 0;  // reset counter after recovery actions
     }
     
@@ -1584,7 +1809,7 @@ function loadSetupFromStorage(){
     // Step 1: Draw if needed (forced draw respected by existing logic)
     if (!P.drawn){
       drawCard();
-      await sleep(200);
+      await sleep(aiSleepTime);
     }
 
     // Step 2: If holding a card, try to place/rotate it; else continue
@@ -1633,11 +1858,11 @@ function loadSetupFromStorage(){
             state.rotateFocus = { x: bestRotPick.x, y: bestRotPick.y, original: state.board[bestRotPick.y][bestRotPick.x].rot };
             state.previewRot  = state.rotateFocus.original;
             render();
-            await sleep(150);
+            await sleep(aiSleepTime);
             await animatePreviewRotation(bestRotPick.rot, 500);
             // Confirm rotation directly instead of re-entering placement mode
             applyRotation();
-            await sleep(180);
+            await sleep(aiSleepTime);
           } else if (placeOK){
             // Perform placement with chosen rotation
             placeMode(); // compute highlights
@@ -1645,14 +1870,41 @@ function loadSetupFromStorage(){
             state.rotateFocus = { x: bestPlace.x, y: bestPlace.y, original: 0 };
             state.previewRot  = 0;
             render();
-            await sleep(150);
+            await sleep(aiSleepTime);
             await animatePreviewRotation(bestPlace.rot, 500);
             placeMode(); // confirm placement
-            await sleep(180);
+            await sleep(aiSleepTime);
           } else {
             bottomCard();
           }
-        }
+        } else {
+          // === Normal track (Straight / Elbow / T / Cross) ===
+          // Pick the best legal cell+rotation and place it; if the score is awful, bottom.
+          const bestPlace = aiBestPlacementForDrawn(P.id, targets);
+          if (bestPlace) {
+            placeMode(); // compute highlights
+            state.phase='place'; state.subphase='rotateNew';
+            state.rotateFocus = { x: bestPlace.x, y: bestPlace.y, original: 0 };
+            state.previewRot  = 0;
+            render();
+            await animatePreviewRotation(bestPlace.rot, 500);
+            // Safety: refuse to commit if the chosen rotation is not fully reciprocal now.
+            {
+              const baseType = baseDrawnType(P.drawn);
+              if (!aiIsReciprocalAt(baseType, bestPlace.rot, bestPlace.x, bestPlace.y)) {
+                // If it somehow became illegal (e.g., after an Undo/Fix), cycle instead of misplacing.
+                bottomCard();
+              } else {
+                // Snap preview to the intended rotation and commit via the usual path.
+                state.previewRot = bestPlace.rot|0;
+                placeMode(); // confirm placement via rotateNew path
+              }
+            }
+            await sleep(aiSleepTime);
+          } else {
+            bottomCard(); // scorer said “not worth placing”
+          }
+        }        
       } else {
         // No legal placement → bottom the card (existing penalties/waivers apply)
         bottomCard();
@@ -1665,7 +1917,7 @@ function loadSetupFromStorage(){
       if (action){
         // Enter token mode and perform the action
         tokenMode(); // highlights tokens/corner
-        await sleep(150);
+        await sleep(aiSleepTime);
         if (action.type === 'place'){
           // Click corner
           const c = action.at;
@@ -1719,6 +1971,8 @@ function loadSetupFromStorage(){
           // remember landing to prevent bounce loops
           if (!state.aiVisitedThisTurn) state.aiVisitedThisTurn = new Set();
           state.aiVisitedThisTurn.add(`${action.to.x},${action.to.y}`);
+          if (!state.aiLastHop) state.aiLastHop = new Map();
+          state.aiLastHop.set(P.id, `${action.to.x},${action.to.y}`);
 
           render(); updateHUD();
         }
@@ -1728,70 +1982,81 @@ function loadSetupFromStorage(){
     // Last chance: if we still haven't used the token and we haven't rolled yet,
     // try one die roll to open paths, then re-evaluate token action.
     if (!P.tokenUsed && !P.rollUsed) {
-      rollDie(); await sleep(200);
-      if (state.die && state.die !== 'X') {
-        applyRotation();                    // uses your existing animations
-        await sleep(250);
-        const again = aiChooseTokenAction(P.id);
-        if (again) {
-          tokenMode(); await sleep(120);
-          if (again.type === 'place') {
-            const c = again.at;
-            const cCell = state.board[c.y][c.x];
-            if (cCell.track && cCell.token == null) {
-              pushHistory('Token: place');
-              cCell.token = P.id;
+      const probe = aiChooseTokenAction(P.id);
+      if (!probe) {
+        rollDie(); await sleep(aiSleepTime);
+        if (state.die && state.die !== 'X') {
+          applyRotation();                    // uses your existing animations
+          await sleep(aiSleepTime2);
+          const again = aiChooseTokenAction(P.id);
+          if (again) {
+            tokenMode(); await sleep(aiSleepTime);
+            if (again.type === 'place') {
+              const c = again.at;
+              const cCell = state.board[c.y][c.x];
+              if (cCell.track && cCell.token == null) {
+                pushHistory('Token: place');
+                cCell.token = P.id;
+                currentPlayer().tokenUsed = true;
+              }
+            } else if (again.type === 'move') {
+              pushHistory('Token: move');
+              state.board[again.from.y][again.from.x].token = null;
+
+              const oppId = opponentCornerAt(again.to.x, again.to.y, P.id);
+              if (oppId != null) {
+                currentPlayer().reached ||= new Set();
+                currentPlayer().reached.add(PLAYERS[oppId].name);
+                currentPlayer().tokensRemoved = Math.min(TOKENS_MAX, (currentPlayer().tokensRemoved|0) + 1);
+              } else {
+                state.board[again.to.y][again.to.x].token = P.id;
+              }
               currentPlayer().tokenUsed = true;
             }
-          } else if (again.type === 'move') {
-            pushHistory('Token: move');
-            state.board[again.from.y][again.from.x].token = null;
+            // clean up token subphase HUD
+            state.phase='idle'; state.subphase=null; state.highlight=[]; state.tokenSelect=null;
+            if (!state.aiLastHop) state.aiLastHop = new Map();
+            state.aiLastHop.set(currentPlayer().id, `${again.to.x},${again.to.y}`);
 
-            const oppId = opponentCornerAt(again.to.x, again.to.y, P.id);
-            if (oppId != null) {
-              currentPlayer().reached ||= new Set();
-              currentPlayer().reached.add(PLAYERS[oppId].name);
-              currentPlayer().tokensRemoved = Math.min(TOKENS_MAX, (currentPlayer().tokensRemoved|0) + 1);
-            } else {
-              state.board[again.to.y][again.to.x].token = P.id;
-            }
-            currentPlayer().tokenUsed = true;
+            render(); updateHUD();
           }
-          // clean up token subphase HUD
-          state.phase='idle'; state.subphase=null; state.highlight=[]; state.tokenSelect=null;
-          render(); updateHUD();
         }
       }
     }
-
-    // --- Step 4: try one die roll if no progress yet ---
-    await sleep(200);
-    if (!P.rollUsed) {
-      rollDie(); await sleep(200);
-      if (state.die && state.die !== 'X') {
-        applyRotation(); await sleep(250);
-        // Re-evaluate token action after rotation
-        const again = aiChooseTokenAction(P.id);
-        if (again) {
-          tokenMode(); await sleep(120);
-          if (again.type === 'move') {
-            pushHistory('Token: move');
-            state.board[again.from.y][again.from.x].token = null;
-            const oppId = opponentCornerAt(again.to.x, again.to.y, P.id);
-            if (oppId != null) {
-              currentPlayer().reached ||= new Set();
-              currentPlayer().reached.add(PLAYERS[oppId].name);
-              currentPlayer().tokensRemoved = Math.min(TOKENS_MAX, (currentPlayer().tokensRemoved|0)+1);
-            } else {
-              state.board[again.to.y][again.to.x].token = P.id;
+    // --- Step 4: conservative die roll — only if token still unused *and* no move exists ---
+    await sleep(aiSleepTime);
+    if (!P.rollUsed && !P.tokenUsed) {
+      // Probe: if a legal token action exists already, don’t roll.
+      const probe = aiChooseTokenAction(P.id);
+      if (!probe) {
+        rollDie(); await sleep(aiSleepTime);
+        if (state.die && state.die !== 'X') {
+          applyRotation(); await sleep(aiSleepTime2);
+          // Re-evaluate token action after rotation
+          const again = aiChooseTokenAction(P.id);
+          if (again) {
+            tokenMode(); await sleep(aiSleepTime);
+            if (again.type === 'move') {
+              pushHistory('Token: move');
+              state.board[again.from.y][again.from.x].token = null;
+              const oppId = opponentCornerAt(again.to.x, again.to.y, P.id);
+              if (oppId != null) {
+                currentPlayer().reached ||= new Set();
+                currentPlayer().reached.add(PLAYERS[oppId].name);
+                currentPlayer().tokensRemoved = Math.min(TOKENS_MAX, (currentPlayer().tokensRemoved|0)+1);
+              } else {
+                state.board[again.to.y][again.to.x].token = P.id;
+              }
+              currentPlayer().tokenUsed = true;
+              if (!state.aiVisitedThisTurn) state.aiVisitedThisTurn = new Set();
+              state.aiVisitedThisTurn.add(`${again.to.x},${again.to.y}`);
+              if (!state.aiLastHop) state.aiLastHop = new Map();
+              state.aiLastHop.set(currentPlayer().id, `${again.to.x},${again.to.y}`);
             }
-            currentPlayer().tokenUsed = true;
-            if (!state.aiVisitedThisTurn) state.aiVisitedThisTurn = new Set();
-            state.aiVisitedThisTurn.add(`${again.to.x},${again.to.y}`);
+            state.phase='idle'; state.subphase=null; render(); updateHUD();
           }
-          state.phase='idle'; state.subphase=null; render(); updateHUD();
         }
-      }
+      }    
     }
 
     // --- Step 5: waive impossible force placement and end turn ---
@@ -1803,15 +2068,15 @@ function loadSetupFromStorage(){
       state.forceElbowFor = null;
     }
 
-    // --- Always reset skip counters after any waiver -----------------------
-    if (!state.forcePlace) {
-      P.skipCount = 0;
-    }
-    if (state.forceElbowFor == null) {
-      P.elbowSkipCount = 0;
-    }
+    // (Do not reset skip counters here; they persist across turns
+    //  and are only cleared by a successful placement/rotation.)
+    endTurn();
+    // Release AI lock at end of turn driver
+    state.aiBusy = false;
 
     endTurn();
+    // Release AI lock at end of turn driver
+    state.aiBusy = false;
   }
 
   // Hypothetical path test: if we placed (type,rot) at (x,y), is there a reciprocal path
@@ -1872,6 +2137,9 @@ function loadSetupFromStorage(){
   }
 
   function newGame(){
+    // Reset AI scheduling/guards
+    if (state.aiTimer) { try { clearTimeout(state.aiTimer); } catch(e) {} state.aiTimer = null; }
+    state.aiBusy = false;    
     // Use the in-game dropdown as the source of truth.
     const uiSize = parseInt(UI.boardSize().value, 10) || 9;
     state.N = uiSize;
@@ -1980,6 +2248,12 @@ function loadSetupFromStorage(){
     }
     // Close the window so mid-turn calls won’t trigger the force
     state._enforceForcePlaceWindow = false;
+    // If forced placement is active this turn, surface the warning immediately
+    if (state.forcePlace) {
+      setStatus('Maximum track cards skipped — you must place a legal track before ending your turn.');
+      toast('Forced placement: draw & place required');
+    }
+
     // Ensure counter exists on first load (startTurn runs before newGame)
     if (!state.cornerLockTurns) state.cornerLockTurns = PLAYERS.map(()=>0);    
 
@@ -2020,7 +2294,13 @@ function loadSetupFromStorage(){
     // === AI entry point: if this player is AI, take the entire turn now ===
     if (P.ai) {
       // Small timeout to let the HUD render the start of turn before actions
-      setTimeout(aiTakeTurn, 120);
+      if (state.aiTimer) { try { clearTimeout(state.aiTimer); } catch(e) {} }
+      state.aiTimer = setTimeout(() => {
+        // Guard against re-entry (e.g., if Undo/Redo fired in the meantime)
+        if (!state.aiBusy && currentPlayer() === P) {
+          aiTakeTurn();
+        }
+      }, 120);    
     }    
   }
 
@@ -2030,7 +2310,7 @@ function loadSetupFromStorage(){
     // If the ending player is still holding a track card, count as a skip
     const endingP = state.players[state.current];
     if (endingP.drawn && isTrackCard(endingP.drawn)) {
-      endingP.skipCount++;
+      endingP.skipCount = Math.min(3, (endingP.skipCount|0) + 1);
       if (endingP.skipCount >= 3) {
         endingP.forcePlaceNext = true;  // enforce on their NEXT turn
       }      
@@ -2038,14 +2318,18 @@ function loadSetupFromStorage(){
 
     // If they are holding an Elbow, count an elbow-skip too
     if (endingP.drawn === TrackCard.Elbow) {
-      endingP.elbowSkipCount++;
+      endingP.elbowSkipCount = Math.min(3, (endingP.elbowSkipCount|0) + 1);
       checkForceElbow(endingP);
     }    
 
     state.current=(state.current+1)%state.players.length;
     startTurn();
-    // Don't overwrite Fix prompts or GameOver after startTurn()
-    if (state.phase !== 'cornerFix' && state.phase !== 'deadFix' && state.phase !== 'gameOver') {
+    refreshSkipTags();
+    // Don't overwrite Fix prompts, GameOver, or any FORCED state after startTurn()
+    const forcedNow =
+      state.forcePlace ||
+      (state.forceElbowFor != null && state.forceElbowFor === state.current);
+    if (state.phase !== 'cornerFix' && state.phase !== 'deadFix' && state.phase !== 'gameOver' && !forcedNow) {
       setStatus('Turn passed.');
     }
     state.turnAdvancing=false;
@@ -2063,13 +2347,8 @@ function loadSetupFromStorage(){
     if ((state.forceElbowFor === P.id) && (P.drawn === TrackCard.Elbow) && !canPlaceElbowNow(P.id)) {
       state.forceElbowFor = null;
     }
-    // --- Reset skip counters whenever a force is waived -------------------
-    if (!state.forcePlace) {
-      P.skipCount = 0;
-    }
-    if (state.forceElbowFor == null) {
-      P.elbowSkipCount = 0;
-    }
+    // (Do not reset skip counters here. They reset only when a card is
+    //  successfully placed/rotated, or when an Elbow is actually placed.)
 
     // Block ending the turn if an Elbow is being forced and *is* placeable.
     if ((state.forceElbowFor === P.id) && (P.drawn === TrackCard.Elbow) && canPlaceElbowNow(P.id)) {
@@ -2126,13 +2405,13 @@ function loadSetupFromStorage(){
     // If max-skips is forcing placement but this card cannot be placed anywhere,
     // waive the force rule now to avoid deadlocks.
     checkForcePlace();
-    updateHUD();
+    updateHUD(); refreshSkipTags();
     // If elbow is being forced and an Elbow was drawn but can't be placed, waive the force.
     if (state.forceElbowFor === P.id && P.drawn === TrackCard.Elbow) {
       if (!canPlaceElbowNow(P.id)) {
         state.forceElbowFor = null;
         setStatus('Force (Elbow) waived — no legal Elbow placement.');
-        updateHUD();
+        updateHUD(); refreshSkipTags();
       }
     }
     // If player is over the elbow-skip threshold and just drew an Elbow
@@ -2148,165 +2427,245 @@ function loadSetupFromStorage(){
       (P.drawn === TrackCard.Elbow) &&
       canPlaceElbowNow(P.id);
     updateHUD();
-    if (elbowForceNow) {
+    // If this is a forced-placement turn (3/3 skips) and the drawn card CAN be placed,
+    // show a clear, immediate warning that they must place it now.
+    if (state.forcePlace && P.drawn && canPlaceDrawnNow(P.id)) {
+      setStatus('Maximum track cards skipped — you must PLACE this drawn track before ending your turn.');
+      toast('Forced placement: you must place this card');
+    } else if (elbowForceNow) {
       setStatus('Elbows Skipped: 3/3 ⚠. This elbow must be now be placed');
     } else {
       setStatus(`${P.name} drew ${P.drawn}. Click Place.`);
     }
   }
 
-// Placement includes adjacency to player's tokens (even if token is on opponent tile)
-function connectedTrackFromCorner(pid){
-  const start = cornerFor(pid);
-  const key = (x,y)=>x+','+y;
-  const vis = new Set();
-  const comp = [];
-  const q = [];
-  if (!within(start.x,start.y)) return comp;
-  const startCell = state.board[start.y][start.x];
-  if (!startCell.track){ return comp; } // No network yet if no track at corner
-  q.push({x:start.x,y:start.y}); vis.add(key(start.x,start.y)); comp.push({x:start.x,y:start.y});
-  while(q.length){
-    const {x,y} = q.shift();
-    const here = state.board[y][x];
-    if(!here.track || here.track==='Block') continue;
-    const opens = rotatedOpenings(here);
-    for(const [dx,dy] of opens){
-      const nx=x+dx, ny=y+dy; if(!within(nx,ny)) continue;
-      const there = state.board[ny][nx];
-      if(!there.track || there.track==='Block') continue;
-      // openings must match in opposite direction
-      const reciprocal = [-dx,-dy];
-      const hasBack = rotatedOpenings(there).some(([adx,ady])=>adx===reciprocal[0] && ady===reciprocal[1]);
-      if(!hasBack) continue;
-      const k = key(nx,ny);
-      if(!vis.has(k)){ vis.add(k); q.push({x:nx,y:ny}); comp.push({x:nx,y:ny}); }
+  // Placement includes adjacency to player's tokens (even if token is on opponent tile)
+  function connectedTrackFromCorner(pid){
+    const start = cornerFor(pid);
+    const key = (x,y)=>x+','+y;
+    const vis = new Set();
+    const comp = [];
+    const q = [];
+    if (!within(start.x,start.y)) return comp;
+    const startCell = state.board[start.y][start.x];
+    if (!startCell.track){ return comp; } // No network yet if no track at corner
+    q.push({x:start.x,y:start.y}); vis.add(key(start.x,start.y)); comp.push({x:start.x,y:start.y});
+    while(q.length){
+      const {x,y} = q.shift();
+      const here = state.board[y][x];
+      if(!here.track || here.track==='Block') continue;
+      const opens = rotatedOpenings(here);
+      for(const [dx,dy] of opens){
+        const nx=x+dx, ny=y+dy; if(!within(nx,ny)) continue;
+        const there = state.board[ny][nx];
+        if(!there.track || there.track==='Block') continue;
+        // openings must match in opposite direction
+        const reciprocal = [-dx,-dy];
+        const hasBack = rotatedOpenings(there).some(([adx,ady])=>adx===reciprocal[0] && ady===reciprocal[1]);
+        if(!hasBack) continue;
+        const k = key(nx,ny);
+        if(!vis.has(k)){ vis.add(k); q.push({x:nx,y:ny}); comp.push({x:nx,y:ny}); }
+      }
     }
+    return comp;
   }
-  return comp;
-}
 
-function connectedTrackFrom(x0, y0){
-  const key = (x,y)=>x+','+y;
-  const vis = new Set();
-  const comp = [];
-  if (!within(x0,y0)) return comp;
-  const start = state.board[y0][x0];
-  if (!start.track) return comp;
+  function connectedTrackFrom(x0, y0){
+    const key = (x,y)=>x+','+y;
+    const vis = new Set();
+    const comp = [];
+    if (!within(x0,y0)) return comp;
+    const start = state.board[y0][x0];
+    if (!start.track) return comp;
 
-  const q = [{x:x0,y:y0}];
-  vis.add(key(x0,y0));
-  comp.push({x:x0,y:y0});
+    const q = [{x:x0,y:y0}];
+    vis.add(key(x0,y0));
+    comp.push({x:x0,y:y0});
 
-  while(q.length){
-    const {x,y} = q.shift();
-    const here = state.board[y][x];
-    if(!here.track || here.track==='Block') continue;
+    while(q.length){
+      const {x,y} = q.shift();
+      const here = state.board[y][x];
+      if(!here.track || here.track==='Block') continue;
 
-    for(const [dx,dy] of rotatedOpenings(here)){
+      for(const [dx,dy] of rotatedOpenings(here)){
+        const nx = x+dx, ny = y+dy;
+        if(!within(nx,ny)) continue;
+        const there = state.board[ny][nx];
+        if(!there.track || there.track==='Block') continue;
+        if(!hasReciprocal(here, there, dx, dy)) continue;
+
+        const k = key(nx,ny);
+        if(!vis.has(k)){
+          vis.add(k);
+          q.push({x:nx,y:ny});
+          comp.push({x:nx,y:ny});
+        }
+      }
+    }
+    return comp;
+  }
+
+  // Start: Code to prevent "corner-lockout"
+  function cornerNeighbors(pid){ // returns [{x,y} corner, {x,y} n1, {x,y} n2]
+    const c = cornerFor(pid);
+    if (PLAYERS[pid].pocket === 'NW') return [c, {x:1,y:0},{x:0,y:1}];
+    if (PLAYERS[pid].pocket === 'NE') return [c, {x:state.N-2,y:0},{x:state.N-1,y:1}];
+    if (PLAYERS[pid].pocket === 'SE') return [c, {x:state.N-2,y:state.N-1},{x:state.N-1,y:state.N-2}];
+    // SW
+    return [c, {x:1,y:state.N-1},{x:0,y:state.N-2}];
+  }
+
+  // --- Corner seal detector (local, rotation-cost aware) ---
+  // A corner is considered sealed iff BOTH adjacent neighbors exist AND, for each neighbor,
+  // the minimal number of tiles you'd need to rotate (corner and/or that neighbor) to create
+  // a reciprocal connection is > 1. In other words: there is NO one-tile fix.
+  const RR_ROTATIONS = [0,90,180,270];
+  function rotatedOpeningsType(type, rot){
+    const r = snap90(rot|0);
+    return OPENINGS[type].map(([dx,dy])=>rotDir([dx,dy], r));
+  }
+  function hasReciprocalTypes(typeA, rotA, typeB, rotB, dx, dy){
+    const aOK = rotatedOpeningsType(typeA, rotA).some(([rx,ry])=>rx===dx && ry===dy);
+    if(!aOK) return false;
+    const bOK = rotatedOpeningsType(typeB, rotB).some(([rx,ry])=>rx===-dx && ry===-dy);
+    return bOK;
+  }
+  function minRotationsToConnect(cornerCell, nbrCell, dx, dy){
+    if(!cornerCell?.track || !nbrCell?.track) return Infinity;
+    let best = Infinity;
+    for (const rc of RR_ROTATIONS){
+      for (const rn of RR_ROTATIONS){
+        if (hasReciprocalTypes(cornerCell.track, rc, nbrCell.track, rn, dx, dy)){
+          const cost = (rc===cornerCell.rot?0:1) + (rn===nbrCell.rot?0:1); // tile-count cost
+          if (cost < best) best = cost;
+        }
+      }
+    }
+    return best;
+  }
+
+  function isCornerSealed(pid){
+    const [co, n1, n2] = cornerNeighbors(pid);
+    const corner = state.board[co.y][co.x];
+    const a = state.board[n1.y][n1.x];
+    const b = state.board[n2.y][n2.x];
+    if (!corner.track) return false;
+    if (!(a.track && b.track)) return false; // evaluate only once both neighbors exist
+
+    // Only the explicit "perpendicular straights jam" counts as sealed.
+    // Corner must be a Straight, and both adjacent tiles must be Straights, and
+    // both must be perpendicular to the corner's orientation.
+    if (corner.track !== 'Straight') return false;
+    if (!(a.track === 'Straight' && b.track === 'Straight')) return false;
+    const isH = (rot) => ((rot % 180) === 0);
+    const cornerIsHorizontal = isH(corner.rot);
+    const aIsHorizontal      = isH(a.rot);
+    const bIsHorizontal      = isH(b.rot);
+    // Horizontal corner jammed by two verticals, or vertical corner jammed by two horizontals
+    return (cornerIsHorizontal && !aIsHorizontal && !bIsHorizontal) ||
+          (!cornerIsHorizontal && aIsHorizontal && bIsHorizontal);
+  }
+
+  function startCornerFixCross(ownerId){
+    state.phase = 'cornerFix';
+    state.fixOwner  = ownerId;
+    state.fixCorner = cornerFor(ownerId); // {x,y}
+    state.highlight = [state.fixCorner];
+    state.rotateFocus = null; state.previewRot = 0;
+    // Show a persistent RED warning while the fix is pending
+    setStatus('<span class="warn">Your corner is sealed. Click on your corner track to replace it with a cross track.</span>');
+    updateHUD();
+  }
+
+  // Recompute corner seals after any topology change and toast when a new seal appears
+  function onTopologyChanged(){
+    if (!state.cornerSealed) state.cornerSealed = PLAYERS.map(()=>false);
+    const prev = state.cornerSealed.slice();
+    const now  = PLAYERS.map(p=>isCornerSealed(p.id));
+    state.cornerSealed = now;
+    for (let pid=0; pid<PLAYERS.length; pid++){
+      if (now[pid] && !prev[pid]){
+        // Keep toast visible long enough to read
+        toast(PLAYERS[pid].name + " corner sealed — corner will be auto-fixed on their next turn.", 4500);      
+      }
+    }
+    refreshBoardSaturation();
+  }
+
+  // For a hypothetical placement, count total reciprocal attachments, and how many are "friendly"
+  // (friendly = neighbor owned by pid OR neighbor in pid's corner-connected network).
+  function aiAttachmentBreakdown(type, rot, x, y, pid){
+    let total = 0, friendly = 0;
+    const opens = rotatedOpeningsType(type, rot);
+    const net = connectedTrackFromCorner(pid);
+    const netSet = new Set(net.map(p => `${p.x},${p.y}`));
+    for (const [dx,dy] of opens){
       const nx = x+dx, ny = y+dy;
-      if(!within(nx,ny)) continue;
-      const there = state.board[ny][nx];
-      if(!there.track || there.track==='Block') continue;
-      if(!hasReciprocal(here, there, dx, dy)) continue;
-
-      const k = key(nx,ny);
-      if(!vis.has(k)){
-        vis.add(k);
-        q.push({x:nx,y:ny});
-        comp.push({x:nx,y:ny});
-      }
+      if (!within(nx,ny)) continue;
+      const n = state.board[ny][nx];
+      if (!n || !n.track) continue;
+      if (!hasReciprocalTypes(type, rot, n.track, n.rot, dx, dy)) continue;
+      total++;
+      if (n.owner === pid || netSet.has(`${nx},${ny}`)) friendly++;
     }
+    return { total, friendly };
   }
-  return comp;
-}
 
-
-// Start: Code to prevent "corner-lockout"
-function cornerNeighbors(pid){ // returns [{x,y} corner, {x,y} n1, {x,y} n2]
-  const c = cornerFor(pid);
-  if (PLAYERS[pid].pocket === 'NW') return [c, {x:1,y:0},{x:0,y:1}];
-  if (PLAYERS[pid].pocket === 'NE') return [c, {x:state.N-2,y:0},{x:state.N-1,y:1}];
-  if (PLAYERS[pid].pocket === 'SE') return [c, {x:state.N-2,y:state.N-1},{x:state.N-1,y:state.N-2}];
-  // SW
-  return [c, {x:1,y:state.N-1},{x:0,y:state.N-2}];
-}
-
-// --- Corner seal detector (local, rotation-cost aware) ---
-// A corner is considered sealed iff BOTH adjacent neighbors exist AND, for each neighbor,
-// the minimal number of tiles you'd need to rotate (corner and/or that neighbor) to create
-// a reciprocal connection is > 1. In other words: there is NO one-tile fix.
-const RR_ROTATIONS = [0,90,180,270];
-function rotatedOpeningsType(type, rot){
-  const r = snap90(rot|0);
-  return OPENINGS[type].map(([dx,dy])=>rotDir([dx,dy], r));
-}
-function hasReciprocalTypes(typeA, rotA, typeB, rotB, dx, dy){
-  const aOK = rotatedOpeningsType(typeA, rotA).some(([rx,ry])=>rx===dx && ry===dy);
-  if(!aOK) return false;
-  const bOK = rotatedOpeningsType(typeB, rotB).some(([rx,ry])=>rx===-dx && ry===-dy);
-  return bOK;
-}
-function minRotationsToConnect(cornerCell, nbrCell, dx, dy){
-  if(!cornerCell?.track || !nbrCell?.track) return Infinity;
-  let best = Infinity;
-  for (const rc of RR_ROTATIONS){
-    for (const rn of RR_ROTATIONS){
-      if (hasReciprocalTypes(cornerCell.track, rc, nbrCell.track, rn, dx, dy)){
-        const cost = (rc===cornerCell.rot?0:1) + (rn===nbrCell.rot?0:1); // tile-count cost
-        if (cost < best) best = cost;
-      }
+  // True if (x,y) touches any track that is "friendly" to pid:
+  // owned by pid OR inside pid's corner-connected network (ownership-agnostic once connected).
+  function hasFriendlyNeighbor(x, y, pid){
+    const net = connectedTrackFromCorner(pid);
+    const netSet = new Set(net.map(p => `${p.x},${p.y}`));
+    const dirs = [[1,0],[-1,0],[0,1],[0,-1]];
+    for (const [dx,dy] of dirs){
+      const nx = x+dx, ny = y+dy;
+      if (!within(nx,ny)) continue;
+      const n = state.board[ny][nx];
+      if (!n || !n.track) continue;
+      if (n.owner === pid) return true;
+      if (netSet.has(`${nx},${ny}`)) return true;
     }
+    return false;
   }
-  return best;
-}
 
-function isCornerSealed(pid){
-  const [co, n1, n2] = cornerNeighbors(pid);
-  const corner = state.board[co.y][co.x];
-  const a = state.board[n1.y][n1.x];
-  const b = state.board[n2.y][n2.x];
-  if (!corner.track) return false;
-  if (!(a.track && b.track)) return false; // evaluate only once both neighbors exist
+  // For the current player's *drawn* card, does (x,y) have ANY rotation that
+  // both reciprocally connects to neighbors AND gives degree>0?
+  // Allow an exception only if this is the very first placement at the player’s corner.
+  function attachOkForDrawnHere(pid, x, y){
+    const P = state.players[pid];
+    if (!P || !P.drawn) return false;
+    const base  = baseDrawnType(P.drawn);
+    const first = aiIsFirstPlacement(pid);
+    const c     = cornerFor(pid);
 
-  // Only the explicit "perpendicular straights jam" counts as sealed.
-  // Corner must be a Straight, and both adjacent tiles must be Straights, and
-  // both must be perpendicular to the corner's orientation.
-  if (corner.track !== 'Straight') return false;
-  if (!(a.track === 'Straight' && b.track === 'Straight')) return false;
-  const isH = (rot) => ((rot % 180) === 0);
-  const cornerIsHorizontal = isH(corner.rot);
-  const aIsHorizontal      = isH(a.rot);
-  const bIsHorizontal      = isH(b.rot);
-  // Horizontal corner jammed by two verticals, or vertical corner jammed by two horizontals
-  return (cornerIsHorizontal && !aIsHorizontal && !bIsHorizontal) ||
-         (!cornerIsHorizontal && aIsHorizontal && bIsHorizontal);
-}
+  // 1) Prefer real attachments that touch *friendly* neighbors.
+  for (const R of [0,90,180,270]){
+    if (!aiIsReciprocalAt(base, R, x, y)) continue;
+    const br = aiAttachmentBreakdown(base, R, x, y, pid);
+    if (br.friendly > 0) return true;              // connects to your network (owned or connected)
+  }
+  // 2) If no attaching rotation exists, still allow *adjacent-only* placement
+  //    as long as the empty cell is next to your friendly network.
+  if (hasFriendlyNeighbor(x, y, pid)) return true;
+  // 3) Corner seed exception: very first placement at your own corner.
+  return first && x===c.x && y===c.y;
+  }
 
-function startCornerFixCross(ownerId){
-  state.phase = 'cornerFix';
-  state.fixOwner  = ownerId;
-  state.fixCorner = cornerFor(ownerId); // {x,y}
-  state.highlight = [state.fixCorner];
-  state.rotateFocus = null; state.previewRot = 0;
-  // Show a persistent RED warning while the fix is pending
-  setStatus('<span class="warn">Your corner is sealed. Click on your corner track to replace it with a cross track.</span>');
-  updateHUD();
-}
-// Recompute corner seals after any topology change and toast when a new seal appears
-function onTopologyChanged(){
-  if (!state.cornerSealed) state.cornerSealed = PLAYERS.map(()=>false);
-  const prev = state.cornerSealed.slice();
-  const now  = PLAYERS.map(p=>isCornerSealed(p.id));
-  state.cornerSealed = now;
-  for (let pid=0; pid<PLAYERS.length; pid++){
-    if (now[pid] && !prev[pid]){
-      // Keep toast visible long enough to read
-      toast(PLAYERS[pid].name + " corner sealed — corner will be auto-fixed on their next turn.", 4500);      
+  // … other helpers …
+
+  // Count reciprocal attachments the new piece would make at (x,y,rot)
+  function aiDegreeIfPlaced(type, rot, x, y){
+    let degree = 0;
+    const opens = rotatedOpeningsType(type, rot);
+    for (const [dx,dy] of opens){
+      const nx = x+dx, ny = y+dy;
+      if (!within(nx,ny)) continue;
+      const n = state.board[ny][nx];
+      if (!n || !n.track) continue;
+      if (hasReciprocalTypes(type, rot, n.track, n.rot, dx, dy)) degree++;
     }
+    return degree;
   }
-  refreshBoardSaturation();
-}
 
 // Correctly compute placement highlight positions applying these rules:
 // (1) Corner-connected network (net): ownership-agnostic, so if you connect into an opponent’s tracks, their connected network is usable too.
@@ -2434,7 +2793,27 @@ function computePlaceHighlights(){
   }
 
   // Finalize highlights
-  state.highlight = Array.from(adj.values());
+  {
+    const P = currentPlayer();
+    const all = Array.from(adj.values());
+    // Keep all OCCUPIED targets (rotation/replacement like RS/RE/RT/RC),
+    // but for EMPTY cells require an actual attachment (deg>0) unless it’s
+    // the very first placement at your own corner.
+    state.highlight = all.filter(({x,y}) => {
+      const cell = state.board[y][x];
+      // Always allow occupied targets when holding RS/RE/RT or RC (rotate/replace).
+      if (cell.track){
+        const d = P.drawn;
+        if (d===TrackCard.RStraight || d===TrackCard.RElbow || d===TrackCard.RT) return true;
+        if (d===TrackCard.RCross) return true;
+        // If we’re holding a normal track but clicked an occupied cell,
+        // this wasn’t meant to be shown anyway; fall through to false.
+        return false;
+      }
+      // Empty cell: must attach (or be the first-at-corner seed).
+      return attachOkForDrawnHere(P.id, x, y);
+    });
+  }
 }
 
 // Returns true if the current player's *currently drawn card* has at least one legal
@@ -2718,23 +3097,29 @@ function checkForceElbow(P){
     const forcedButImpossible =
       (state.forceElbowFor === P.id) && !canPlaceElbowNow(P.id);
     if (penalize && !forcedButImpossible) {
-      P.skipCount++;
+      P.skipCount = Math.min(3, (P.skipCount|0) + 1);
       if (P.skipCount >= 3) {
         P.forcePlaceNext = true;   // do NOT force mid-turn; enforce next turn
+       // Inform immediately that next turn will be forced
+       toast('Max skips reached: forced placement next turn');        
       }      
       if (bottomed === TrackCard.Elbow) {
-        P.elbowSkipCount = (P.elbowSkipCount|0) + 1;
+        P.elbowSkipCount = Math.min(3, (P.elbowSkipCount|0) + 1);
         checkForceElbow(P);                // ← elbow-only checker
       }
     }
     // If we waived elbow force, clear it explicitly
     if (forcedButImpossible) state.forceElbowFor = null;
-    setStatus('Bottomed. Drawing is locked until End Turn.');
+    setStatus(
+      (P.skipCount >= 3)
+        ? 'Bottomed. Drawing is locked until End Turn.<br><span class="warn">Maximum track cards skipped — you must place a legal track next turn.</span>'
+        : 'Bottomed. Drawing is locked until End Turn.'
+    );
    }
  
    state.phase='idle'; state.highlight=[]; state.hover=null;
    checkForcePlace();
-   updateHUD();
+   updateHUD(); refreshSkipTags();
    maybeAutoAdvance();
  }
 
@@ -3677,7 +4062,17 @@ function checkForceElbow(P){
       btn('applyBtn').disabled = !(state.die && state.die!=='X');
       if (elbowForceNow) {
         setStatus('Elbows Skipped: 3/3 ⚠. This elbow must be now be placed');
-      }      
+      }
+      // During forced placement, Bottom must not be available if the drawn card can be placed now.
+      try {
+        const P = currentPlayer && currentPlayer();
+        const mustPlaceNow = !!(state.forcePlace && P && P.drawn && canPlaceDrawnNow(P.id));
+        const bottomBtn = document.getElementById('bottomBtn');
+        if (bottomBtn) {
+          bottomBtn.disabled = bottomBtn.disabled || mustPlaceNow;
+          bottomBtn.title = mustPlaceNow ? 'Disabled: forced placement this turn' : '';
+        }
+      } catch {}            
 
       render();
       updateUndoButtons();

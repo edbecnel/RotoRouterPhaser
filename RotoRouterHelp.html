@@ -104,17 +104,20 @@
     </ol>
     <p class="tip"><i>Forced play:</i> If a forced card has <b>no legal placement</b>, the force is <b>waived</b>; you may Bottom it.</p>
     <h2>AI Players</h2>
-    <ul>
-      <li><b>Path-focused movement:</b> prefers moves that reduce distance to any <i>unreached</i> opponent corner; avoids immediate back-tracking and short loops.</li>
-      <li><b>Rotation-first when stalled:</b> if no progress is possible, the AI prioritizes <b>die rotations</b> and conservatively skips <b>RS/RE/RT/RC</b>, saving them for endgame connections.</li>
-      <li><b>Dual-use awareness:</b> RT behaves like RS/RE — it can rotate an existing <b>T</b> or place a new one.</li>
-      <li><b>Save/Load safe:</b> AI flags and per-turn memory persist in saved games.</li>
-    </ul>
+      <ul>
+        <li><b>Targeting:</b> moves toward the last unreached corner and lingers near key elbows/straights before leaving.</li>
+        <li><b>Legality:</b> the AI now follows the same adjacency rules as players—its tracks must attach to its own network or to a connected joint network. It will not place tiles that only touch opponent tracks without connecting.</li>
+        <li><b>Stall recovery:</b> when progress stalls, the AI cycles one card and performs at most one die rotation before re-evaluating.</li>
+        <li><b>Card economy:</b> holds RS/RE/RT/RC for endgame; Bottoms low-value cards only when not forced.</li>
+        <li><b>Save/Load safe:</b> AI flags and counters persist in saved games.</li>
+      </ul>
     <h2>Forced Play Rules</h2>
     <ul>
       <li><b>3 Skipped Tracks:</b> If you skip 3 track cards in a row, on your <b>next turn</b> you must <b>Draw and Place</b> the card drawn (if there is a legal placement). Bottom and End Turn are disabled until you place it.</li>
       <li><b>3 Skipped Elbows:</b> If you skip 3 Elbows, the <b>next Elbow you draw must be placed</b> immediately (if there is a legal placement). Bottom and End Turn are disabled until the Elbow is placed.</li>
       <li>If the forced card has <b>no legal placement</b>, the force is <b>waived</b> to avoid deadlocks — you may Bottom it and end your turn normally.</li>
+      <li><b>Undo safety:</b> Undo/Redo during a forced turn preserves the forced state. <b>Bottom</b> remains disabled until you complete or waive the forced placement.</li>
+      <li><b>HUD banner:</b> During a forced turn, the status line now shows <b>“Forced: Draw &amp; Place”</b> before you draw.</li>
     </ul>
     <h2>Legal Placement &amp; Connections</h2>
     <h3>Track placement</h3>
@@ -122,6 +125,8 @@
       <li>Place only into an <b>empty</b> cell.</li>
       <li>The cell must be <b>adjacent</b> (N/S/E/W) to at least one track connected to your network.</li>
       <li>Touching sides must have <b>matching, reciprocal exits</b> to connect to opponent networks.</li>
+      <li><b>Adjacency rule:</b> You may place next to your own network even if the new tile does not connect.
+Opponents may place adjacent to your tracks only if their new tile connects to your network; once two networks connect, both sides may build adjacent along that shared network.</li>
     </ul>
     <h3>Connected network</h3>
     <ul>

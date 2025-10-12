@@ -69,6 +69,8 @@ _Tip:_ while a placement “ghost” is shown, use **Q/E** to rotate before conf
 - **3 Skipped Tracks**: If you skip 3 track cards in a row, on your **next turn** you must **Draw and Place** the card drawn (if legal). Bottom and End Turn are disabled until you place it.
 - **3 Skipped Elbows**: If you skip 3 Elbows, the **next Elbow drawn must be placed** immediately (if legal). Bottom and End Turn are disabled until the Elbow is placed.
 - If a forced card has **no legal placement**, the force is **waived** — you may Bottom it and end your turn normally.
+- **Undo safety:** if you Undo during a forced turn, the forced state remains active and **Bottom/End Turn** stay disabled until the card is placed or the force is waived.
+- **HUD banner:** at the start of a forced turn the status shows **“Forced: Draw & Place”** before drawing.
 
 ---
 
@@ -79,6 +81,8 @@ _Tip:_ while a placement “ghost” is shown, use **Q/E** to rotate before conf
 - The cell must be **empty**.
 - It must be **adjacent** (N/S/E/W) to at least one track **connected to your network**.
 - All touching sides must have **matching, reciprocal exits**.
+- **Adjacency rule:** you may place adjacent to your own network even if the new tile does not connect.
+  Opponents may only place adjacent to your tracks when their network connects to yours; once networks are joined, either side may build adjacent along that shared network.
 
 **Connected network**
 
@@ -162,7 +166,8 @@ If your own home corner is sealed by perpendicular Straights:
 
 ## AI Players
 
-- **Path-focused movement:** prefers moves that reduce Manhattan distance to any _unreached_ opponent corner; avoids immediate back-tracking/short loops.
-- **Stall handling:** when progress stalls, AI prioritizes **die rotations** and conservatively **skips RS/RE/RT/RC**, saving them for endgame connections.
-- **RT parity:** RT behaves like RS/RE (rotate existing T or place a new T).
-- **Save/Load:** AI flags and per-turn memory persist in snapshots.
+- **Targeting:** moves toward the last unreached corner and lingers near leverage joints to prepare for die rotations.
+- **Legality:** follows the same adjacency rule as human players; cannot place tiles that touch an opponent’s network without connecting.
+- **Stall recovery:** when no progress occurs, cycles one card and performs a single die rotation before re-evaluating.
+- **Card economy:** saves RS/RE/RT/RC for endgame; Bottoms weak cards only when not forced.
+- **Save/Load:** AI memory and counters persist in snapshots.

@@ -35,6 +35,15 @@ A tactical route-building board game with optional AI players.
 - **Dual-use awareness:** **RT** now mirrors **RS/RE** behavior for placement _and_ rotation.
 - **Save/Load:** AI flags, per-turn memory, and counters survive snapshot load.
 
+### AI Phase-2 / Placement Updates (Oct 12 2025)
+
+- **Placement legality tightened:** AI can no longer place tracks that only touch opponent tiles without connecting to them. A placement must connect to at least one friendly track, or to a joined network where both sides are connected.
+- **Adjacency refinement:** human players may always place adjacent to their own network (even without connecting); opponents can only place adjacent to yours once their network has become connected to it.
+- **Forced-placement state:** if you Undo during a forced turn, the state persists; **Bottom** and **End Turn** stay disabled until the forced card is placed or waived.
+- **AI stall recovery:** now performs at most one die-rotation per stall cycle instead of every turn.
+- **AI card economy:** saves RS/RE/RT/RC for endgame, Bottoms weak cards only when not forced.
+- **Tooltip added:** End Turn shows a short hint when disabled due to forced placement.
+
 ### Bug fixes
 
 - Fixed undefined refs (`firstPlace`, `firstPlacementRelax`, `oppId`, `oppCorners`, `best`) that could halt turns.
@@ -42,18 +51,148 @@ A tactical route-building board game with optional AI players.
 - Fixed forced-play counters not resetting in some flows (draw, bottom, waive).
 - Fixed deck-full state where drawing should remain allowed if **any** rotation cards remain in the deck.
 
+### Bug Fixes (Oct 12 2025)
+
+- Skipped-count reset fixed: turn-skip and elbow-skip counters no longer reset incorrectly at the start of a new turn.
+- Forced-state restoration: Undo/Redo during a forced turn now fully restores the forced-placement lock so Bottom and End Turn remain disabled until you place or waive the card.
+- AI legality fix: AI can no longer place tracks that only touch opponent tiles without connecting; placement now requires at least one friendly connection or a joined network.
+- Adjacency highlight fix: human placement preview no longer shows island cells (no attachments) as valid except for the very first corner placement.
+- Rotation spam: AI die-rotation frequency reduced—only rolls when a rotation could open progress.
+- Undo safety: pending AI timers are cleared on Undo/Redo to prevent duplicate actions.
+- Skip-count clamp: counters capped at 3 / 3 (max) to prevent “4 / 3” displays.
+- HUD consistency: skipped counters, forced-turn banner, and tooltips now update instantly across Undo/Redo and AI turns.
+
 ---
 
-## How to play
+## Files
 
-Open `RotoRouter.html` in a modern desktop browser. For rules and examples, see **RotoRouterHelp.html** or **RotoRouter-Rules.md**.
+- `RotoRouter.html` — the whole game (UI + logic)
+- `MainMenu.html` — setup screen (board size, players, AI flags, names)
+- `RotoRouterHelp.html` — in-game help (HTML)
+- `RotoRouter-Rules.md` — printable rules (Markdown)
+- _(optional)_ JSON save files produced by the Save/Load UI
+
+---
+
+## Quick Start
+
+1. Open **`MainMenu.html`** (or `RotoRouter.html` → click **Main Menu**).
+2. Pick a **Board Size**: 7×7 or 9×9.
+3. Mark 2–4 colors **Active** (toggle AI if desired, edit names).
+4. Click **New Game**.
+5. On your turn:
+   - **Draw** a card (if you don’t already hold one).
+   - **Play** the card:
+     - Place a track in a legal empty cell _or_
+     - Use **RS/RE/RT** to rotate a matching placed tile _or_
+     - Use **RC** to replace any placed tile with a Cross
+     - _(Dual-use)_ RS/RE/RT/RC may also be placed as their base track.
+   - Optionally take **Token Action**:
+     - **Place** a token on your home corner (if a track is there), or
+     - **Move** one token along connected tracks to any reachable empty cell.
+   - **End Turn**.
 
 **Controls**
 
-- Rotate preview: **Q/E** (or ⟲/⟳ on sidebar)
-- Confirm placement: click again or **Confirm**
-- Token move: select **Token Action**, click a token, then a highlighted destination
-- Undo/Redo: per-turn or global
+- Rotate while previewing a placement: **Q/E** or sidebar **⟲/⟳**.
+- Confirm placement: click again or **Place/Confirm**.
+- **Undo / Redo (Global)**: roll back/forward the entire table state.
+- **Save/Load**: snapshot to JSON and restore later.
+
+---
+
+## Deck & Cards
+
+**Tracks**
+
+- Straight (─), Elbow (└), T (┴), Cross (┼)
+
+**Rotation/Replacement (dual-use)**
+
+- **RS** rotate Straight _or_ place Straight
+- **RE** rotate Elbow _or_ place Elbow
+- **RT** rotate T _or_ place T
+- **RC** replace any tile with Cross _or_ place Cross
+
+**Deck scaling**
+
+- Per-player decks scale with player count to keep supply healthy.
+- Minimum per player:
+  - **7×7:** Straight 7, Elbow 6, T 3, Cross 1
+  - **9×9:** Straight 9, Elbow 8, T 3, Cross 1
+- RS/RE/RT/RC scale too. Decks are created at **New Game**.
+
+---
+
+## Legal Placement & Networks
+
+- Place only into an **empty** cell.
+- The cell must be **adjacent** (N/S/E/W) to at least one track that is **connected to your network**.
+- For two touching tracks to connect, the sides must have **matching, reciprocal exits**.
+- **Opponent adjacency:**
+  - Your normal placements may be adjacent to your own network.
+  - You **may not** place adjacent to an opponent’s disconnected track unless the new tile **connects into** that opponent network via reciprocal exits.
+  - Once a connection exists, both players may extend anywhere **adjacent to that connected network** (connected or merely adjacent).
+
+---
+
+## Tokens & Scoring
+
+- **Place** a token on your home corner if a track is present there.
+- **Move** a token along connected paths to any reachable empty cell (one token action per turn).
+- **Score** by ending on an opponent’s corner → remove that token from the board.
+- First player to **3 scored corners** wins; afterwards they’re auto-skipped.
+
+---
+
+## Forced Play
+
+- **3 Skipped Tracks:** If you Bottom/skip 3 cards in a row, your **next turn** is **Forced Placement**.  
+  HUD shows **“Forced: Draw & Place”**; **Bottom** and **End Turn** are disabled until you place the drawn card (if any legal spot exists).  
+  If the drawn card has **no legal placement**, the force is **waived** and you may Bottom it.
+- **3 Skipped Elbows:** If you skip 3 Elbows, the **next Elbow you draw** must be placed immediately (same waiver rule if no legal spot).
+
+Forced state survives Undo/Redo correctly; after undoing during a forced turn, **Bottom** remains disabled again until the placement is resolved.
+
+---
+
+## AI (Phase-2 behaviors in this build)
+
+- **Token targeting:** prefers paths that reduce distance to the **last unreached corner**; lingers near **high-leverage joints** (e.g., [1,5], [1,6]) to exploit future die rotations before moving away.
+- **Placement legality fix:** AI cannot place adjacent to your disconnected tracks; it must connect into an opponent network to build alongside it.
+- **Card economy:** biases saving **RS/RE/RT/RC** for endgame connections; will Bottom non-progress tracks when not forced.
+- **Stall behavior:** on repeated non-improvement, cycles a card and attempts a single, conservative die rotation; re-evaluates without spamming rotations.
+- **Save/Load safe:** AI flags and per-turn memory are serialized in saves.
+
+---
+
+## Standings & UI
+
+- **Standings panel** in the sidebar shows rank (1st, T-2nd, etc.), color, name, and scores for **active** players only.
+- Corners table includes a **Place** column mirroring standings.
+- On touch: tap a legal cell to enter rotation mode; rotate with ⟲/⟳; tap again to confirm.
+
+---
+
+## Save / Load
+
+Use the **Save** button to download a JSON snapshot. **Load** restores exactly, including turn order, decks, forced states, and AI status.
+
+---
+
+## Known Notes
+
+- The “RC adopts replaced color” idea is **not implemented** yet (tracked for a later phase).
+- If a trapped Straight or sealed corner appears, the **Dead-Straight Fix** or **Corner Fix** rules (below) apply at the start of your turn.
+
+---
+
+## Advanced Rules (implemented)
+
+- **Dead-Straight Fix:** at the start of your turn, you may convert one fully trapped Straight into a Cross (free).
+- **Corner Fix:** if your home corner is sealed by perpendicular Straights, you must convert it to a Cross before other actions.
+
+See **RotoRouter-Rules.md** for a printable ruleset and **RotoRouterHelp.html** for a formatted, in-app reference.
 
 ---
 
