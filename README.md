@@ -8,6 +8,29 @@ A tactical route-building board game with optional AI players.
 
 ## What’s new (Oct 13, 2025)
 
+### AI: rotation gating, exploration, and no-op tolerance
+
+- **Rotation gating:** the AI **only rolls the die** after first probing for a legal token move and only when a rotation is likely to help.
+- **Exploratory move before rotating:** if recent rotations from the same cell don’t help, the AI will try a short **exploration move** to a nearby branching spot and re-evaluate before attempting another die roll.
+- **No-op tolerance:** if neither a token move nor a rotation would improve connectivity (e.g., early game with no nearby networks), the AI may **Bottom and end the turn** without moving or rotating.
+- **Anti-bounce:** remembers the last hop/edge to prevent A↔B “ping-pong”.
+
+### Solo-AI pause & Continue
+
+- When only **one AI player** remains and all human players are finished, the game **pauses** and shows:
+  > “There is only one AI player left. If you wish to stop now, click **New Game**, or press **Continue** to proceed.”
+- Press **Continue** to resume AI play; the banner and button disappear.
+
+### Forced play / HUD polish
+
+- If **3 elbows were skipped**, the next drawn Elbow must be placed (if legal). When the counter resets to **0/3**, the **warning style clears**.
+- If a forced card has **no legal placement**, the force is **waived** to avoid deadlocks.
+
+### Bug fixes
+
+- Fixed “endless rotation” cases by adding stricter rotation gates and an exploration fallback.
+- Fixed standings to avoid duplicate “1st place”; unique places advance to **2nd/3rd/4th** correctly.
+
 ### Track colors
 
 - Newly placed tracks now adopt the **placing player’s color** for their line art.

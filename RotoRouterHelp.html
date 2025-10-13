@@ -110,14 +110,21 @@
     </ol>
     <p class="tip"><i>Forced play:</i> If a forced card has <b>no legal placement</b>, the force is <b>waived</b>; you may Bottom it.</p>
     <h2>AI Players</h2>
-      <ul>
-        <li><b>Targeting:</b> moves toward the last unreached corner; avoids short loops.</li>
-        <li><b>Rotation gating:</b> the AI <b>only rolls to rotate after probing</b> for a legal token move. If a legal move exists, it will not roll pre-emptively.</li>
-        <li><b>Stall recovery:</b> when progress stalls, the AI cycles one card and performs <b>at most one</b> die rotation before re-evaluating.</li>
-        <li><b>Legality:</b> follows the same adjacency rules as players; won’t place tiles that only touch opponent tracks without connecting.</li>
-        <li><b>Card economy:</b> prefers saving RS/RE/RT/RC for endgame; Bottoms low-value cards only when not forced.</li>
-        <li><b>Save/Load safe:</b> AI flags and counters persist in saved games.</li>
-      </ul>
+    <ul>
+      <li><b>Targeting:</b> moves toward the last unreached corner; avoids short loops.</li>
+      <li><b>Rotation gating:</b> the AI <b>only rolls to rotate after probing</b> for a legal token move. If a legal move exists, it will not roll pre-emptively.</li>
+      <li><b>Stall recovery:</b> when progress stalls, the AI cycles one card and performs <b>at most one</b> die rotation before re-evaluating.</li>
+      <li><b>Legality:</b> follows the same adjacency rules as players; won’t place tiles that only touch opponent tracks without connecting.</li>
+      <li><b>Card economy:</b> prefers saving RS/RE/RT/RC for endgame; Bottoms low-value cards only when not forced.</li>
+      <li><b>Save/Load safe:</b> AI flags and counters persist in saved games.</li>
+    </ul>
+    <h2>Solo-AI Pause</h2>
+    <p>When only <b>one AI player</b> remains and all human players are finished, play <b>pauses</b> and a banner appears:</p>
+    <p class="tip">“There is only one AI player left. If you wish to stop now, click <b>New&nbsp;Game</b>, or press <b>Continue</b> to proceed.”</p>
+    <ul>
+      <li>Press <b>Continue</b> to resume AI play; the banner and button disappear.</li>
+      <li>You can click <b>New&nbsp;Game</b> at any time to start fresh.</li>
+    </ul>
     <h2>Forced Play Rules</h2>
     <ul>
       <li><b>3 Skipped Tracks:</b> If you skip 3 track cards in a row, on your <b>next turn</b> you must <b>Draw and Place</b> the card drawn (if there is a legal placement). Bottom and End Turn are disabled until you place it.</li>

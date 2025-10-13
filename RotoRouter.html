@@ -37,6 +37,10 @@
       background:#222;
       color:#fff;
     }
+    /* Keep the Corners table lines on one row */
+    .scoreTable td { white-space: nowrap; }
+    /* Prevent odd breaks inside bolded labels in the status line */
+    #status b { white-space: nowrap; }
     @media (prefers-color-scheme: dark){
       .aiBadge{ background:#4b5563; color:#fff; }
     }
@@ -75,6 +79,8 @@
       <div class="row">
         <button class="btn" id="newGameBtn">New Game</button>
         <button class="btn" id="returnMenuBtn">Main Menu</button>
+        <!-- Shown only when a single AI player remains; resumes play once -->
+        <button class="btn" id="continueBtn" style="display:none;">Continue</button>        
       </div>
       <h2>Actions</h2>
       <div class="panel">
@@ -233,7 +239,135 @@ function loadSetupFromStorage(){
   const tokenTag=()=>tag('tokenTag');
   const tokenCount=()=>tag('tokenCount');
   const btn=(id)=>document.getElementById(id);
+
+  // === Solo-AI pause UI ===
+  function showSoloAIPrompt(){
+    const b = btn('continueBtn');
+    if (b){ b.style.display='inline-block'; b.disabled=false; }
+    state.pausedForSoloAI = true;
+    // Keep the comma attached to "New Game" and prefer non-breaking in the label
+    setStatus('There is only one AI player left. If you wish to stop now, click <b>New&nbsp;Game,</b> or press <b>Continue</b> to proceed.');    
+  }
+  function hideSoloAIPrompt(){
+    const b = btn('continueBtn');
+    if (b){ b.style.display='none'; }
+    state.pausedForSoloAI = false;
+  }
+
+  // Count unfinished players (excludes finished and those totally out of tokens)
+  function countIncomplete(){ 
+    let ai=0, human=0;
+    for (const p of state.players){
+      if (!p) continue;
+      const finished = playerHasFinished(p);
+      const out = ((p.tokensRemoved|0) >= TOKENS_MAX) && (countTokens(p.id)===0);
+      if (finished || out) continue;
+      if (p.ai) ai++; else human++;
+    }
+    return {ai, human};
+  }
+  function onlyOneAILeft(){ 
+    const {ai, human} = countIncomplete(); 
+    return ai===1 && human===0; 
+  }
+
+  // Wire the Continue button (run the current AI turn once, then hide)
+  (function(){
+    const b = btn('continueBtn');
+    if (!b) return;
+    b.addEventListener('click', ()=>{
+      hideSoloAIPrompt();
+      state.soloAIResumed = true; // ← prevent future pauses while one AI remains
+      const P = currentPlayer && currentPlayer();
+      if (P && P.ai && !state.aiBusy){
+        if (state.aiTimer) { try{ clearTimeout(state.aiTimer);}catch(e){} state.aiTimer=null; }
+        state.aiTimer = setTimeout(()=>{
+          if (!state.aiBusy && (currentPlayer()===P)) aiTakeTurn();
+        }, 80);
+      }
+    });
+  })();
+
+  // Accurate standings: compute per-player reached count and render with proper ordinals.
+  function renderStandingsAccurate(){
+    const players = state.players || [];
+    const target = Math.max(1, players.length - 1); // corners to reach
+    const countReachedFor = (p)=>{
+      const r = p && p.reached;
+      if (r instanceof Set) return r.size;
+      if (Array.isArray(r)) return r.length;
+      // fallback if some code recorded an integer
+      return Number(p && p.score) || 0;
+    };
+    const ordinal = (n)=>{ const s=["th","st","nd","rd"], v=n%100; return n+(s[(v-20)%10]||s[v]||s[0]); };
+    // rank by reached corners desc; stable within ties
+    const ranked = players.map(p=>({p, sc: countReachedFor(p)}))
+                          .sort((a,b)=> b.sc - a.sc);
+    const host = document.getElementById('standingsList')
+             || document.getElementById('standings')
+             || document.querySelector('.standings');
+    if (!host) return;
+    host.innerHTML = ranked.map((row, i)=>{
+      const p = row.p, sc = row.sc;
+      const aiTag = p.ai ? ' <span class="muted">AI</span>' : '';
+      return `<div class="stand-row"><span class="dot" style="background:${p.color}"></span> ${ordinal(i+1)} ${p.name} <span class="muted">(${sc}/${target})</span>${aiTag}</div>`;
+    }).join('');
+  }
   
+  // Decide whether AI should even consider using a die roll (rotation) this turn.
+  // Conservative rules:
+  // - Never roll while still holding/handling a track card (finish placement/bottoming first).
+  // - Never roll if a legal token action already exists.
+  // - Optionally honor a rotation embargo counter if present.
+  function shouldConsiderDieRoll(P){
+    if (!P) return false;
+    // If a track card is in hand, prioritize resolving it (place or bottom), not rotating.
+    if (P.drawn) return false;
+    // Optional: respect any embargo counters if present in the save/state.
+    if ((P.rotationEmbargoTurns|0) > 0) return false;
+    // If recent rotations repeatedly failed to unlock movement, skip more rotations.
+    if ((P._failedRotationTurns|0) >= 2) return false;
+    // If we’ve been stalled for a couple of turns, prefer scouting moves over more rotations.
+    if ((P._aiStalledTurns|0) >= 2) return false;    
+    // If we already have a legal token action, there's no need to roll.
+    try{
+      if (typeof aiChooseTokenAction === 'function' && aiChooseTokenAction(P.id)) return false;
+    }catch(_){}
+    // Otherwise, rolling may help break a stall.
+    return true;
+  }  
+
+  // === AI thinking UI/lock ===
+  // Locks sidebar buttons & canvas input while current player (AI) is acting.
+  // Also annotates the Turn tag with "(AI thinking…)" for observability.
+  function setAIThinking(on){
+    state.lockInput = !!on;
+    const cur = currentPlayer && currentPlayer();
+    const isAI = !!(cur && cur.ai);
+    // Disable most sidebar buttons while AI is acting (leave Save/Load/Menu usable)
+    try{
+      document.querySelectorAll('.sidebar button').forEach(b=>{
+        const id = b.id || '';
+        const allow = (id==='saveBtn' || id==='loadBtn' || id==='returnMenuBtn' || id==='loadFile');
+        b.disabled = !!on && isAI ? !allow : b.disabled && false; // re-enable when we unlock
+      });
+    } catch(_) {}
+    // Annotate Turn tag without fighting updateHUD too much
+    const t = turnTag && turnTag();
+    if (t && cur){
+      const base = `Turn: ${cur.name}${cur.ai ? ' (AI)' : ''}`;
+      t.textContent = on && isAI ? base.replace(' (AI)', ' (AI thinking…)') : base;
+    }
+  }
+
+  // Keyboard guard so humans can't accidentally fire shortcuts during an AI turn
+  window.addEventListener('keydown', (e)=>{
+    try{
+      const cur = currentPlayer && currentPlayer();
+      if (state.lockInput && cur && cur.ai){ e.stopPropagation(); e.preventDefault(); }
+    }catch(_){}
+  }, true);
+
   // Keep “Skipped” HUD tags in sync with the current player's counters
   function refreshSkipTags(){
     const P = currentPlayer && currentPlayer();
@@ -885,7 +1019,67 @@ function loadSetupFromStorage(){
       P._aiStalledTurns = 0;
     }
 
-    return null; // no-op
+    // --- NEW: exploration fallback (avoid endless rotations) -----------------
+    // If rotations haven’t helped recently OR we’ve been stalled for a bit,
+    // allow a non-strict move that increases future options (branching/leverage),
+    // still avoiding ping-pong (no immediate backtrack or edge reverse).
+    if ((P._failedRotationTurns|0) >= 1 || (P._aiStalledTurns|0) >= 2) {
+      const allOCs = opponentCorners(pid);
+      const reachedSet = P.reached instanceof Set ? P.reached : new Set(P.reached||[]);
+      const unreachedOCs = allOCs.filter(oc=>{
+        const name = PLAYERS.find(pp=>cornerFor(pp.id).x===oc.x && cornerFor(pp.id).y===oc.y)?.name;
+        return !reachedSet.has(name);
+      });
+      const targets = unreachedOCs.length ? unreachedOCs : allOCs;
+      let bestMove = null, bestScore = -Infinity, bestFrom = null;
+
+      const center = { x:(state.N-1)/2, y:(state.N-1)/2 };
+      const centerBonus = (p)=> (Math.max(0, 8 - (Math.abs(p.x-center.x)+Math.abs(p.y-center.y))));
+
+      for (const t of myTokens) {
+        const moves = reachableFrom(t, pid);
+        if (!moves.length) continue;
+        const d0 = Math.min(...targets.map(oc => manhattan(t, oc)));
+        const lastKey  = state.aiLastHop?.get(pid) || null;
+        const lastEdge = state.aiLastEdge?.get(pid) || null;
+        const fromK = `${t.x},${t.y}`;
+
+        for (const m of moves) {
+          const mk = `${m.x},${m.y}`;
+          // Anti ping-pong
+          if (lastKey && mk === lastKey) continue;
+          if (lastEdge && lastEdge === `${mk}|${fromK}`) continue; // immediate reverse edge
+
+          const dNear   = Math.min(...targets.map(oc => manhattan(m, oc)));
+          const worse   = Math.max(0, dNear - d0);      // distance increase (penalize lightly)
+          const branch  = (()=>{                        // local branching (reciprocal degree)
+            let deg=0;
+            const here = state.board[m.y][m.x];
+            if (here && here.track) {
+              for (const [dx,dy] of rotatedOpenings(here)) {
+                const nx=m.x+dx, ny=m.y+dy;
+                if (!within(nx,ny)) continue;
+                const nb = state.board[ny][nx];
+                if (!nb || !nb.track) continue;
+                if (hasReciprocal(here, nb, dx, dy)) deg++;
+              }
+            }
+            return deg;
+          })();
+          const targetHint = (unreachedOCs[0] || targets[0]);
+          const leverage = aiRotationLeverageAt(m.x, m.y, pid, targetHint); // future rotate value
+          // Score: prefer more branching/leverage, mild preference to center, mild penalty if farther.
+          const score = (branch * 1.2) + (leverage * 1.5) + (centerBonus(m) * 0.2) - (worse * 0.8);
+          if (score > bestScore) { bestScore = score; bestMove = m; bestFrom = t; }
+        }
+      }
+
+      if (bestMove) {
+        return { type:'move', from: bestFrom, to: bestMove };
+      }
+    }
+
+    return null; // no-op (no sensible exploration found)
   }
 
   function makeDeck(size, activeCount=4){
@@ -977,15 +1171,17 @@ function loadSetupFromStorage(){
     deadFixDoneThisTurn: false,
     rotAnims: [],  // active rotation tweens (on placed tiles)
     ghostRotAnim: null,   // {from,to,t0,dur} while rotating the ghost
-    _animating: false,     // RAF loop guard
+    _animating: false,    // RAF loop guard
     gearSpinAnim: null,   // { base: +90|-90|180, t0, dur } active only during Apply tween
     gearOffset: null,     // per-cell persistent gear angle offset (degrees, 0..359)
     // Undo/Redo stacks
     history: [],        // Global undo stack (array of snapshots)
     redo:    [],        // Global redo stack
     turnHistory: [],    // Per-turn undo stack (current player's turn)
-    turnRedo:   [],      // Per-turn redo stack
-    forceElbowFor: null, // If set to a player id, that player must place an Elbow this turn (but only if placement is possible)
+    turnRedo:   [],     // Per-turn redo stack
+    pausedForSoloAI: false,
+    soloAIResumed: false, // once user clicks Continue, don’t pause again
+    forceElbowFor: null,  // If set to a player id, that player must place an Elbow this turn (but only if placement is possible)
     _enforceForcePlaceWindow: false  // gate: only true during startTurn() check
   };
 
@@ -1227,6 +1423,7 @@ function loadSetupFromStorage(){
       cornerLockTurns: Array.isArray(state.cornerLockTurns) ? [...state.cornerLockTurns] : null,
       cornerSealed: Array.isArray(state.cornerSealed) ? [...state.cornerSealed] : null,
       deadFixDoneThisTurn: !!state.deadFixDoneThisTurn,   // ← top-level, not per-player
+      finishOrder: Array.isArray(state.finishOrder) ? state.finishOrder.slice() : [],
       // We intentionally DO NOT persist: phase, subphase, highlights, die, animations, hover, etc.
     };
   }
@@ -1304,6 +1501,10 @@ function loadSetupFromStorage(){
 
     // (place near other local helpers/reads at the top of applySnapshot)
     const setupFromStorage = loadSetupFromStorage(); // may be null
+    // Restore finish order (unique placements)
+    state.finishOrder = Array.isArray(snap.finishOrder)
+      ? snap.finishOrder.map(v => (v|0)).filter(v => Number.isInteger(v))
+      : [];    
 
     // Restore players (keep order aligned with PLAYERS by id)
     state.players = PLAYERS.map((baseP) => {
@@ -1425,7 +1626,8 @@ function loadSetupFromStorage(){
     state.deadFixDoneThisTurn = !!snap.deadFixDoneThisTurn;   // default false if absent
 
     // Ensure AI hop memory is fresh after a load
-    state.aiLastHop = new Map();    
+    state.aiLastHop = new Map();
+    state.soloAIResumed = false;  // allow prompt again on a loaded game
 
     // Recompute saturation immediately after restore
     refreshBoardSaturation();
@@ -1640,6 +1842,15 @@ function loadSetupFromStorage(){
     return reached.size >= 3;
   }
 
+  // Record the order in which players complete 3/3 corners.
+  // (Used to assign unique final places: 1st, 2nd, 3rd, 4th.)
+  function recordFinishIfNew(P){
+    if (!P) return;
+    if (!playerHasFinished(P)) return;
+    state.finishOrder = Array.isArray(state.finishOrder) ? state.finishOrder : [];
+    if (!state.finishOrder.includes(P.id)) state.finishOrder.push(P.id);
+  }
+
   // BFS for token moves — by default do NOT pass through any tokens.
   // If no destinations exist under that rule, do a fallback BFS that allows
   // pass-through over *opponent* tokens (never over your own). Corners can’t
@@ -1745,404 +1956,450 @@ function loadSetupFromStorage(){
     if (state.aiTimer) { try { clearTimeout(state.aiTimer); } catch(e) {} state.aiTimer = null; }
     
     const P = currentPlayer();
+    // Lock UI & annotate HUD while this AI is acting
+    setAIThinking(true);
+    setStatus(`${P.name} (AI) is thinking…`);
 
-    // EARLY ROTATION GUARD:
-    // Do NOT roll the die before drawing/placing at the start of a turn.
-    // Only consider a pre-draw rotation if drawing is already consumed/locked this turn,
-    // or we are already holding a card (i.e., mid-hand), or the board is saturated.
-    if (!P.rollUsed && !P.tokenUsed &&
-        (P.drawUsed || P.drawLocked || P.drawn != null || state.boardSaturated)) {
-      const probeEarly = aiChooseTokenAction(P.id);
-      if (!probeEarly) {
-        rollDie();
-        await sleep(aiSleepTime2);
-        if (state.die && state.die !== 'X') {
-          applyRotation();
+    try {
+
+      // EARLY ROTATION GUARD:
+      // Do NOT roll the die before drawing/placing at the start of a turn.
+      // Only consider a pre-draw rotation if drawing is already consumed/locked this turn,
+      // or we are already holding a card (i.e., mid-hand), or the board is saturated.
+      if (!P.rollUsed && !P.tokenUsed &&
+          (P.drawUsed || P.drawLocked || P.drawn != null || state.boardSaturated)) {
+        const probeEarly = aiChooseTokenAction(P.id);
+        if (!probeEarly) {
+          rollDie();
           await sleep(aiSleepTime2);
+          if (state.die && state.die !== 'X') {
+            applyRotation();
+            await sleep(aiSleepTime2);
+          }
         }
       }
-    }
 
-    // --- Forced placement turn handling (prevents AI deadlock at 3/3) ---
-    if (state.forcePlace && P && P.ai) {
-      // 1) Ensure we have a drawn card
-      if (!P.drawn) { drawCard(); await sleep(aiSleepTime2); render(); updateHUD(); }
-      // 2) If we can place NOW, do it (prefer heuristic; fall back to first legal)
-      if (P.drawn && canPlaceDrawnNow(P.id)) {
-        // Compute legal targets *now* and pass them into the heuristic
-        const targetsNow = aiListLegalTargets(P.id);
-        const heur = (typeof aiBestPlacementForDrawn === 'function'
-                      ? aiBestPlacementForDrawn(P.id, targetsNow)
-                      : null);
-        const fb   = aiFirstLegalPlacementForDrawn(P.id);
-        // Normalize to a single {x,y,rot} shape
-        const pick = heur ? { x: heur.x, y: heur.y, rot: heur.rot }
-                          : (fb ? { x: fb.at.x, y: fb.at.y, rot: fb.rot } : null);
-        if (pick) {
-          // Use the same commit path used elsewhere:
-          // placeMode() → set rotateNew focus/rot → placeMode() again to commit.
-          placeMode(); // compute highlights
-          state.phase = 'place';
-          state.subphase = 'rotateNew';
-          state.rotateFocus = { x: pick.x, y: pick.y, original: 0 };
-          state.previewRot  = pick.rot|0;
-          render();
-          await sleep(aiSleepTime);
-          // Safety: re-check with base type (handles RT/RE/RS normalization).
-          const baseType = baseDrawnType(P.drawn);
-          if (aiIsReciprocalAt(baseType, pick.rot, pick.x, pick.y)) {
-            placeMode(); // confirm placement via rotateNew path
-          } else {
-            bottomCard(); // conditions changed → don’t force a bad placement
-          }          
-          await sleep(aiSleepTime);
-          // placed
-          render(); updateHUD(); refreshSkipTags && refreshSkipTags();
-          // Finish the turn normally
-          endTurn(); state.aiBusy = false; return;
-        }                          
+      // --- Forced placement turn handling (prevents AI deadlock at 3/3) ---
+      if (state.forcePlace && P && P.ai) {
+        // 1) Ensure we have a drawn card
+        if (!P.drawn) { drawCard(); await sleep(aiSleepTime2); render(); updateHUD(); }
+        // 2) If we can place NOW, do it (prefer heuristic; fall back to first legal)
+        if (P.drawn && canPlaceDrawnNow(P.id)) {
+          // Compute legal targets *now* and pass them into the heuristic
+          const targetsNow = aiListLegalTargets(P.id);
+          const heur = (typeof aiBestPlacementForDrawn === 'function'
+                        ? aiBestPlacementForDrawn(P.id, targetsNow)
+                        : null);
+          const fb   = aiFirstLegalPlacementForDrawn(P.id);
+          // Normalize to a single {x,y,rot} shape
+          const pick = heur ? { x: heur.x, y: heur.y, rot: heur.rot }
+                            : (fb ? { x: fb.at.x, y: fb.at.y, rot: fb.rot } : null);
+          if (pick) {
+            // Use the same commit path used elsewhere:
+            // placeMode() → set rotateNew focus/rot → placeMode() again to commit.
+            placeMode(); // compute highlights
+            state.phase = 'place';
+            state.subphase = 'rotateNew';
+            state.rotateFocus = { x: pick.x, y: pick.y, original: 0 };
+            state.previewRot  = pick.rot|0;
+            render();
+            await sleep(aiSleepTime);
+            // Safety: re-check with base type (handles RT/RE/RS normalization).
+            const baseType = baseDrawnType(P.drawn);
+            if (aiIsReciprocalAt(baseType, pick.rot, pick.x, pick.y)) {
+              placeMode(); // confirm placement via rotateNew path
+            } else {
+              bottomCard(); // conditions changed → don’t force a bad placement
+            }          
+            await sleep(aiSleepTime);
+            // placed
+            render(); updateHUD(); refreshSkipTags && refreshSkipTags();
+            // Finish the turn normally
+            endTurn(); state.aiBusy = false; return;
+          }                          
+        }
+        // 3) If placement truly impossible, *waive* the force to avoid deadlock
+        //    (Rules note: you already waive force when impossible for humans)
+        if (!P.drawn || !canPlaceDrawnNow(P.id)) {
+          state.forcePlace = false;
+          P.skipCount = 0;
+          setStatus('Forced placement waived (no legal placement available).');
+          toast && toast('Force waived: no legal placement');
+          // Continue with the rest of the AI turn as a normal (non-forced) turn
+        }
       }
-      // 3) If placement truly impossible, *waive* the force to avoid deadlock
-      //    (Rules note: you already waive force when impossible for humans)
-      if (!P.drawn || !canPlaceDrawnNow(P.id)) {
-        state.forcePlace = false;
-        P.skipCount = 0;
-        setStatus('Forced placement waived (no legal placement available).');
-        toast && toast('Force waived: no legal placement');
-        // Continue with the rest of the AI turn as a normal (non-forced) turn
-      }
-    }
 
-    // --- Handle AI stall recovery -----------------------------------------
-    if (P._aiStalledTurns && P._aiStalledTurns >= 3) {
-      // After 3 non-progress turns, try card cycling
-      if (P.drawn && P.deck.draw.length > 0) {
-        bottomCard();
-        await sleep(aiSleepTime);
+      // --- Handle AI stall recovery -----------------------------------------
+      if (P._aiStalledTurns && P._aiStalledTurns >= 3) {
+        // After 3 non-progress turns, try card cycling
+        if (P.drawn && P.deck.draw.length > 0) {
+          bottomCard();
+          await sleep(aiSleepTime);
+          drawCard();
+          await sleep(aiSleepTime);
+        }
+        // Also, always roll the die for a new rotation opportunity
+        rollDie();
+        await sleep(aiSleepTime2);
+        applyRotation();
+        await sleep(aiSleepTime2);
+        P._aiStalledTurns = 0;  // reset counter after recovery actions
+      }
+      
+      // reset per-turn AI memory
+      state.aiVisitedThisTurn = new Set();
+      if (!P || !P.ai) return;   // safety
+
+      // Step 1: Draw if needed (forced draw respected by existing logic)
+      if (!P.drawn){
         drawCard();
         await sleep(aiSleepTime);
       }
-      // Also, always roll the die for a new rotation opportunity
-      rollDie();
-      await sleep(aiSleepTime2);
-      applyRotation();
-      await sleep(aiSleepTime2);
-      P._aiStalledTurns = 0;  // reset counter after recovery actions
-    }
-    
-    // reset per-turn AI memory
-    state.aiVisitedThisTurn = new Set();
-    if (!P || !P.ai) return;   // safety
 
-    // Step 1: Draw if needed (forced draw respected by existing logic)
-    if (!P.drawn){
-      drawCard();
-      await sleep(aiSleepTime);
-    }
-
-    // Step 2: If holding a card, try to place/rotate it; else continue
-    if (P.drawn){
-      // --- FORCED ELBOW: must place now if legal --------------------------
-      if (state.forceElbowFor === P.id && P.drawn === TrackCard.Elbow && canPlaceElbowNow(P.id)) {
-        const targetsNow = aiListLegalTargets(P.id);
-        // Prefer the heuristic picker; fall back to first legal that reciprocally attaches
-        const pick = (typeof aiBestPlacementForDrawn === 'function')
-          ? aiBestPlacementForDrawn(P.id, targetsNow)
-          : null;
-        const fb   = pick ? null : aiFirstLegalPlacementForDrawn(P.id);
-        const chosen = pick
-          ? { x: pick.x, y: pick.y, rot: pick.rot }
-          : (fb ? { x: fb.at.x, y: fb.at.y, rot: fb.rot } : null);
-        if (chosen) {
-          placeMode(); // compute highlights
-          state.phase = 'place';
-          state.subphase = 'rotateNew';
-          state.rotateFocus = { x: chosen.x, y: chosen.y, original: 0 };
-          state.previewRot  = chosen.rot|0;
-          render();
-          await sleep(aiSleepTime);
-          placeMode(); // commit placement
-          // Clear elbow force after successful placement
-          P.elbowSkipCount = 0;
-          state.forceElbowFor = null;
-          await sleep(aiSleepTime);
-        } else {
-          // If something changed and it’s no longer placeable, waive the force to avoid deadlock
-          state.forceElbowFor = null;
-        }
-      }
-      const D = P.drawn;
-      // On full board, only rotations/replacements allowed — placeMode() already guards
-      const targets = aiListLegalTargets(P.id);
-      if (targets.length > 0){
-        // If RS/RE/RT on existing tile: pick candidate cell of same base and rotate to best-degree
-        if (D===TrackCard.RStraight || D===TrackCard.RElbow || D===TrackCard.RT){
-          // Evaluate BOTH options:
-          // A) rotate an existing matching tile, B) place a new base piece
-          const baseByCard = {
-            [TrackCard.RStraight]: 'Straight',
-            [TrackCard.RElbow]:    'Elbow',
-            [TrackCard.RT]:        'T',
-          };
-          const baseType = baseByCard[D];
-
-          // Targets for this hand (mix of empties + any rotateExisting cells)
-          const targets = aiListLegalTargets(P.id);
-
-          // --- A) Best rotation on an existing matching tile
-          let bestRotPick = null; // {x,y,rot,score,improve,curScore}
-          for (const t of targets){
-            const cell = state.board[t.y][t.x];
-            if (!cell || !cell.track) continue;
-            if (cell.track !== baseType) continue; // only rotate tiles of the same base type
-            const br = aiBestRotationFor(t.x, t.y, P.id);
-            if (!bestRotPick || br.improve > bestRotPick.improve) bestRotPick = { ...br, x:t.x, y:t.y };
-          }
-
-          // --- B) Best new placement (as baseType) using the existing placement scorer
-          const bestPlace = aiBestPlacementForDrawn(P.id, targets); // understands RS/RE/RT -> baseType
-
-          // Decision: rotate if it truly improves, else place if possible, else bottom
-          const MIN_IMPROVE = 1; // must be strictly better than current orientation
-          const rotOK  = bestRotPick && bestRotPick.improve >= MIN_IMPROVE;
-          const placeOK = !!bestPlace;
-
-          if (rotOK && (!placeOK || bestRotPick.score >= bestPlace.score)){
-            state.forcePlace = false; // ensure we’re not in forced placement mode
-            // Perform rotation with animation
-            placeMode();
-            state.phase='place'; state.subphase='rotateExisting';
-            state.rotateFocus = { x: bestRotPick.x, y: bestRotPick.y, original: state.board[bestRotPick.y][bestRotPick.x].rot };
-            state.previewRot  = state.rotateFocus.original;
-            render();
-            await sleep(aiSleepTime);
-            await animatePreviewRotation(bestRotPick.rot, 500);
-            // Confirm rotation directly instead of re-entering placement mode
-            applyRotation();
-            await sleep(aiSleepTime);
-          } else if (placeOK){
-            // Perform placement with chosen rotation
+      // Step 2: If holding a card, try to place/rotate it; else continue
+      if (P.drawn){
+        // --- FORCED ELBOW: must place now if legal --------------------------
+        if (state.forceElbowFor === P.id && P.drawn === TrackCard.Elbow && canPlaceElbowNow(P.id)) {
+          const targetsNow = aiListLegalTargets(P.id);
+          // Prefer the heuristic picker; fall back to first legal that reciprocally attaches
+          const pick = (typeof aiBestPlacementForDrawn === 'function')
+            ? aiBestPlacementForDrawn(P.id, targetsNow)
+            : null;
+          const fb   = pick ? null : aiFirstLegalPlacementForDrawn(P.id);
+          const chosen = pick
+            ? { x: pick.x, y: pick.y, rot: pick.rot }
+            : (fb ? { x: fb.at.x, y: fb.at.y, rot: fb.rot } : null);
+          if (chosen) {
             placeMode(); // compute highlights
-            state.phase='place'; state.subphase='rotateNew';
-            state.rotateFocus = { x: bestPlace.x, y: bestPlace.y, original: 0 };
-            state.previewRot  = 0;
+            state.phase = 'place';
+            state.subphase = 'rotateNew';
+            state.rotateFocus = { x: chosen.x, y: chosen.y, original: 0 };
+            state.previewRot  = chosen.rot|0;
             render();
             await sleep(aiSleepTime);
-            await animatePreviewRotation(bestPlace.rot, 500);
-            placeMode(); // confirm placement
+            placeMode(); // commit placement
+            // Clear elbow force after successful placement
+            P.elbowSkipCount = 0;
+            state.forceElbowFor = null;
             await sleep(aiSleepTime);
           } else {
-            bottomCard();
+            // If something changed and it’s no longer placeable, waive the force to avoid deadlock
+            state.forceElbowFor = null;
           }
-        } else {
-          // === Normal track (Straight / Elbow / T / Cross) ===
-          // Pick the best legal cell+rotation and place it; if the score is awful, bottom.
-          const bestPlace = aiBestPlacementForDrawn(P.id, targets);
-          if (bestPlace) {
-            placeMode(); // compute highlights
-            state.phase='place'; state.subphase='rotateNew';
-            state.rotateFocus = { x: bestPlace.x, y: bestPlace.y, original: 0 };
-            state.previewRot  = 0;
-            render();
-            await animatePreviewRotation(bestPlace.rot, 500);
-            // Safety: refuse to commit if the chosen rotation is not fully reciprocal now.
-            {
-              const baseType = baseDrawnType(P.drawn);
-              if (!aiIsReciprocalAt(baseType, bestPlace.rot, bestPlace.x, bestPlace.y)) {
-                // If it somehow became illegal (e.g., after an Undo/Fix), cycle instead of misplacing.
-                bottomCard();
-              } else {
-                // Snap preview to the intended rotation and commit via the usual path.
-                state.previewRot = bestPlace.rot|0;
-                placeMode(); // confirm placement via rotateNew path
+        }
+        const D = P.drawn;
+        // On full board, only rotations/replacements allowed — placeMode() already guards
+        const targets = aiListLegalTargets(P.id);
+        if (targets.length > 0){
+          // If RS/RE/RT on existing tile: pick candidate cell of same base and rotate to best-degree
+          if (D===TrackCard.RStraight || D===TrackCard.RElbow || D===TrackCard.RT){
+            // Evaluate BOTH options:
+            // A) rotate an existing matching tile, B) place a new base piece
+            const baseByCard = {
+              [TrackCard.RStraight]: 'Straight',
+              [TrackCard.RElbow]:    'Elbow',
+              [TrackCard.RT]:        'T',
+            };
+            const baseType = baseByCard[D];
+
+            // Targets for this hand (mix of empties + any rotateExisting cells)
+            const targets = aiListLegalTargets(P.id);
+
+            // --- A) Best rotation on an existing matching tile
+            let bestRotPick = null; // {x,y,rot,score,improve,curScore}
+            for (const t of targets){
+              const cell = state.board[t.y][t.x];
+              if (!cell || !cell.track) continue;
+              if (cell.track !== baseType) continue; // only rotate tiles of the same base type
+              const br = aiBestRotationFor(t.x, t.y, P.id);
+              // Keep the best-improving candidate but only if it sits in/adjacent to our network
+              if (!bestRotPick || br.improve > bestRotPick.improve) {
+                bestRotPick = { ...br, x:t.x, y:t.y };
               }
             }
-            await sleep(aiSleepTime);
-          } else {
-            bottomCard(); // scorer said “not worth placing”
-          }
-        }        
-      } else {
-        // No legal placement → bottom the card (existing penalties/waivers apply)
-        bottomCard();
-      }
-    }
 
-    // Step 3: Token action (only if still available and something sensible exists)
-    // If the move would not strictly improve distance, we skip it so we can rotate instead.
-    if (!P.tokenUsed){
-      const action = aiChooseTokenAction(P.id);
-      if (action){
-        // Enter token mode and perform the action
-        tokenMode(); // highlights tokens/corner
-        await sleep(aiSleepTime);
-        if (action.type === 'place'){
-          // Click corner
-          const c = action.at;
-          // Reuse the handler path (simulate click)
-          const wasPhase = state.phase; // token
-          state.subphase='select';
-          const rect = { x:c.x, y:c.y };
-          // Directly perform place by emulating the click branch
-          const cCell = state.board[c.y][c.x];
-          if (cCell.track && cCell.token == null){
-            pushHistory('Token: place');
-            cCell.token = P.id;
-            state.players[P.id].tokens = (countTokens(P.id)|0);
+            // --- B) Best new placement (as baseType) using the existing placement scorer
+            const bestPlace = aiBestPlacementForDrawn(P.id, targets); // understands RS/RE/RT -> baseType
+
+            // Decision: rotate if it truly improves, else place if possible, else bottom
+            const MIN_IMPROVE = 1; // must be strictly better than current orientation
+            const placeOK = !!bestPlace;
+            // Early-game guard: keep building before fiddling with rotations.
+            const netSize = connectedTrackFromCorner(P.id).length;
+            const EARLY_NET_MIN = 4;
+            // Rotation is allowed only if it improves, is local to our network,
+            // and (if early) beats placement by a healthy margin.
+            const rotLocal = bestRotPick && isInOrAdjacentToNet(bestRotPick.x, bestRotPick.y, P.id);
+            const rotOK =
+              bestRotPick &&
+              bestRotPick.improve >= MIN_IMPROVE &&
+              rotLocal &&
+              (
+                netSize >= EARLY_NET_MIN
+                ? (!placeOK || bestRotPick.score >= bestPlace.score)              // normal comparison later in game
+                : (placeOK ? (bestRotPick.score >= bestPlace.score + 8) : true)   // stricter in the opening
+              );
+
+            if (rotOK){            
+              state.forcePlace = false; // ensure we’re not in forced placement mode
+              // Perform rotation with animation
+              placeMode();
+              state.phase='place'; state.subphase='rotateExisting';
+              state.rotateFocus = { x: bestRotPick.x, y: bestRotPick.y, original: state.board[bestRotPick.y][bestRotPick.x].rot };
+              state.previewRot  = state.rotateFocus.original;
+              render();
+              await sleep(aiSleepTime);
+              await animatePreviewRotation(bestRotPick.rot, 500);
+              // Confirm rotation directly instead of re-entering placement mode
+              applyRotation();
+              await sleep(aiSleepTime);
+            } else if (placeOK){
+              // Perform placement with chosen rotation
+              placeMode(); // compute highlights
+              state.phase='place'; state.subphase='rotateNew';
+              state.rotateFocus = { x: bestPlace.x, y: bestPlace.y, original: 0 };
+              state.previewRot  = 0;
+              render();
+              await sleep(aiSleepTime);
+              await animatePreviewRotation(bestPlace.rot, 500);
+              placeMode(); // confirm placement
+              await sleep(aiSleepTime);
+            } else {
+              bottomCard();
+            }
+          } else {
+            // === Normal track (Straight / Elbow / T / Cross) ===
+            // Pick the best legal cell+rotation and place it; if the score is awful, bottom.
+            const bestPlace = aiBestPlacementForDrawn(P.id, targets);
+            if (bestPlace) {
+              placeMode(); // compute highlights
+              state.phase='place'; state.subphase='rotateNew';
+              state.rotateFocus = { x: bestPlace.x, y: bestPlace.y, original: 0 };
+              state.previewRot  = 0;
+              render();
+              await animatePreviewRotation(bestPlace.rot, 500);
+              // Safety: refuse to commit if the chosen rotation is not fully reciprocal now.
+              {
+                const baseType = baseDrawnType(P.drawn);
+                if (!aiIsReciprocalAt(baseType, bestPlace.rot, bestPlace.x, bestPlace.y)) {
+                  // If it somehow became illegal (e.g., after an Undo/Fix), cycle instead of misplacing.
+                  bottomCard();
+                } else {
+                  // Snap preview to the intended rotation and commit via the usual path.
+                  state.previewRot = bestPlace.rot|0;
+                  placeMode(); // confirm placement via rotateNew path
+                }
+              }
+              await sleep(aiSleepTime);
+            } else {
+              bottomCard(); // scorer said “not worth placing”
+            }
+          }        
+        } else {
+          // No legal placement → bottom the card (existing penalties/waivers apply)
+          bottomCard();
+        }
+      }
+
+      // Step 3: Token action (only if still available and something sensible exists)
+      // If the move would not strictly improve distance, we skip it so we can rotate instead.
+      if (!P.tokenUsed){
+        const action = aiChooseTokenAction(P.id);
+        if (action){
+          // Enter token mode and perform the action
+          tokenMode(); // highlights tokens/corner
+          await sleep(aiSleepTime);
+          if (action.type === 'place'){
+            // Click corner
+            const c = action.at;
+            // Reuse the handler path (simulate click)
+            const wasPhase = state.phase; // token
+            state.subphase='select';
+            const rect = { x:c.x, y:c.y };
+            // Directly perform place by emulating the click branch
+            const cCell = state.board[c.y][c.x];
+            if (cCell.track && cCell.token == null){
+              pushHistory('Token: place');
+              cCell.token = P.id;
+              state.players[P.id].tokens = (countTokens(P.id)|0);
+              P.tokenUsed = true;
+              tokenTag().textContent='Token: Used';
+              btn('tokenBtn').disabled = true;
+              state.phase='idle'; state.subphase=null; state.highlight=[]; state.tokenSelect=null;
+              setStatus('AI placed a new token.');
+              render(); updateHUD();
+            }
+          } else if (action.type === 'move'){
+            // Select token, then choose destination
+            tokenMode();
+            state.subphase='select';
+            state.tokenSelect = {x: action.from.x, y: action.from.y};
+            const moves = reachableFrom(action.from, P.id);
+            state.highlight = moves;
+            // Emulate click on target branch
+            const oppId = opponentCornerAt(action.to.x, action.to.y, P.id);
+            pushHistory('Token: move');
+            // clear source
+            state.board[action.from.y][action.from.x].token = null;
+            if (oppId != null){
+              if (!P.reached) P.reached = new Set();
+              const oppName = PLAYERS[oppId].name;
+              P.reached.add(oppName);
+              recordFinishIfNew(oppName);
+              if (state.board[action.to.y][action.to.x].token === P.id) {
+                state.board[action.to.y][action.to.x].token = null;
+              }
+              P.tokensRemoved = Math.min(TOKENS_MAX, (P.tokensRemoved|0) + 1);
+              setStatus(P.name + ' (AI) scored at ' + oppName + "'s corner!");
+            } else {
+              state.board[action.to.y][action.to.x].token = P.id;
+              setStatus('AI moved a token.');
+            }
             P.tokenUsed = true;
             tokenTag().textContent='Token: Used';
             btn('tokenBtn').disabled = true;
             state.phase='idle'; state.subphase=null; state.highlight=[]; state.tokenSelect=null;
-            setStatus('AI placed a new token.');
+
+            // remember landing to prevent bounce loops across turns
+            if (!state.aiVisitedThisTurn) state.aiVisitedThisTurn = new Set();
+            state.aiVisitedThisTurn.add(`${action.to.x},${action.to.y}`);
+            if (!state.aiLastHop) state.aiLastHop = new Map();
+            state.aiLastHop.set(P.id, `${action.to.x},${action.to.y}`);
+            // also remember the traversed edge A→B to forbid immediate reverse B→A next turn
+            if (!state.aiLastEdge) state.aiLastEdge = new Map();
+            state.aiLastEdge.set(P.id, `${action.from.x},${action.from.y}|${action.to.x},${action.to.y}`);
+
             render(); updateHUD();
           }
-        } else if (action.type === 'move'){
-          // Select token, then choose destination
-          tokenMode();
-          state.subphase='select';
-          state.tokenSelect = {x: action.from.x, y: action.from.y};
-          const moves = reachableFrom(action.from, P.id);
-          state.highlight = moves;
-          // Emulate click on target branch
-          const oppId = opponentCornerAt(action.to.x, action.to.y, P.id);
-          pushHistory('Token: move');
-          // clear source
-          state.board[action.from.y][action.from.x].token = null;
-          if (oppId != null){
-            if (!P.reached) P.reached = new Set();
-            const oppName = PLAYERS[oppId].name;
-            P.reached.add(oppName);
-            if (state.board[action.to.y][action.to.x].token === P.id) {
-              state.board[action.to.y][action.to.x].token = null;
-            }
-            P.tokensRemoved = Math.min(TOKENS_MAX, (P.tokensRemoved|0) + 1);
-            setStatus(P.name + ' (AI) scored at ' + oppName + "'s corner!");
-          } else {
-            state.board[action.to.y][action.to.x].token = P.id;
-            setStatus('AI moved a token.');
-          }
-          P.tokenUsed = true;
-          tokenTag().textContent='Token: Used';
-          btn('tokenBtn').disabled = true;
-          state.phase='idle'; state.subphase=null; state.highlight=[]; state.tokenSelect=null;
-
-          // remember landing to prevent bounce loops across turns
-          if (!state.aiVisitedThisTurn) state.aiVisitedThisTurn = new Set();
-          state.aiVisitedThisTurn.add(`${action.to.x},${action.to.y}`);
-          if (!state.aiLastHop) state.aiLastHop = new Map();
-          state.aiLastHop.set(P.id, `${action.to.x},${action.to.y}`);
-          // also remember the traversed edge A→B to forbid immediate reverse B→A next turn
-          if (!state.aiLastEdge) state.aiLastEdge = new Map();
-          state.aiLastEdge.set(P.id, `${action.from.x},${action.from.y}|${action.to.x},${action.to.y}`);
-
-          render(); updateHUD();
         }
       }
-    }
 
-    // Last chance: if we still haven't used the token and we haven't rolled yet,
-    // try one die roll to open paths, then re-evaluate token action.
-    if (!P.tokenUsed && !P.rollUsed) {
-      const probe = aiChooseTokenAction(P.id);
-      if (!probe) {
-        rollDie(); await sleep(aiSleepTime);
-        if (state.die && state.die !== 'X') {
-          applyRotation();                    // uses your existing animations
-          await sleep(aiSleepTime2);
-          const again = aiChooseTokenAction(P.id);
-          if (again) {
-            tokenMode(); await sleep(aiSleepTime);
-            if (again.type === 'place') {
-              const c = again.at;
-              const cCell = state.board[c.y][c.x];
-              if (cCell.track && cCell.token == null) {
-                pushHistory('Token: place');
-                cCell.token = P.id;
+      // Last chance: if we still haven't used the token and we haven't rolled yet,
+      // try one die roll to open paths, then re-evaluate token action.
+      if (!P.tokenUsed && !P.rollUsed) {
+        const probe = aiChooseTokenAction(P.id);
+        if (!probe) {
+          rollDie(); await sleep(aiSleepTime);
+          if (state.die && state.die !== 'X') {
+            applyRotation();                    // uses your existing animations
+            await sleep(aiSleepTime2);
+            const again = aiChooseTokenAction(P.id);
+            if (again) {
+              tokenMode(); await sleep(aiSleepTime);
+              if (again.type === 'place') {
+                const c = again.at;
+                const cCell = state.board[c.y][c.x];
+                if (cCell.track && cCell.token == null) {
+                  pushHistory('Token: place');
+                  cCell.token = P.id;
+                  currentPlayer().tokenUsed = true;
+                }
+              } else if (again.type === 'move') {
+                pushHistory('Token: move');
+                state.board[again.from.y][again.from.x].token = null;
+
+                const oppId = opponentCornerAt(again.to.x, again.to.y, P.id);
+                if (oppId != null) {
+                  currentPlayer().reached ||= new Set();
+                  currentPlayer().reached.add(PLAYERS[oppId].name);
+                  recordFinishIfNew(currentPlayer());
+                  currentPlayer().tokensRemoved = Math.min(TOKENS_MAX, (currentPlayer().tokensRemoved|0) + 1);
+                } else {
+                  state.board[again.to.y][again.to.x].token = P.id;
+                }
                 currentPlayer().tokenUsed = true;
               }
-            } else if (again.type === 'move') {
-              pushHistory('Token: move');
-              state.board[again.from.y][again.from.x].token = null;
-
-              const oppId = opponentCornerAt(again.to.x, again.to.y, P.id);
-              if (oppId != null) {
-                currentPlayer().reached ||= new Set();
-                currentPlayer().reached.add(PLAYERS[oppId].name);
-                currentPlayer().tokensRemoved = Math.min(TOKENS_MAX, (currentPlayer().tokensRemoved|0) + 1);
-              } else {
-                state.board[again.to.y][again.to.x].token = P.id;
-              }
-              currentPlayer().tokenUsed = true;
-            }
-            // clean up token subphase HUD
-            state.phase='idle'; state.subphase=null; state.highlight=[]; state.tokenSelect=null;
-            if (!state.aiLastHop) state.aiLastHop = new Map();
-            state.aiLastHop.set(currentPlayer().id, `${again.to.x},${again.to.y}`);
-
-            render(); updateHUD();
-          }
-        }
-      }
-    }
-    // --- Step 4: conservative die roll — only if token still unused *and* no progressing move exists ---
-    await sleep(aiSleepTime);
-    if (!P.rollUsed && !P.tokenUsed) {
-      // Probe: if a legal token action exists already, don’t roll.
-      const probe = aiChooseTokenAction(P.id);
-      if (!probe) {
-        rollDie(); await sleep(aiSleepTime);
-        if (state.die && state.die !== 'X') {
-          applyRotation(); await sleep(aiSleepTime2);
-          // Re-evaluate token action after rotation
-          const again = aiChooseTokenAction(P.id);
-          if (again) {
-            tokenMode(); await sleep(aiSleepTime);
-            if (again.type === 'move') {
-              pushHistory('Token: move');
-              state.board[again.from.y][again.from.x].token = null;
-              const oppId = opponentCornerAt(again.to.x, again.to.y, P.id);
-              if (oppId != null) {
-                currentPlayer().reached ||= new Set();
-                currentPlayer().reached.add(PLAYERS[oppId].name);
-                currentPlayer().tokensRemoved = Math.min(TOKENS_MAX, (currentPlayer().tokensRemoved|0)+1);
-              } else {
-                state.board[again.to.y][again.to.x].token = P.id;
-              }
-              currentPlayer().tokenUsed = true;
-              if (!state.aiVisitedThisTurn) state.aiVisitedThisTurn = new Set();
-              state.aiVisitedThisTurn.add(`${again.to.x},${again.to.y}`);
+              // clean up token subphase HUD
+              state.phase='idle'; state.subphase=null; state.highlight=[]; state.tokenSelect=null;
               if (!state.aiLastHop) state.aiLastHop = new Map();
               state.aiLastHop.set(currentPlayer().id, `${again.to.x},${again.to.y}`);
+
+              render(); updateHUD();
             }
-            state.phase='idle'; state.subphase=null; render(); updateHUD();
           }
         }
-      }    
-    }
-
-    // --- Step 5: waive impossible force placement and end turn ---
-    if (state.forcePlace) {
-      const tgs = aiListLegalTargets(P.id);
-      if (!tgs || !tgs.length) state.forcePlace = false;
-    }
-    if (state.forceElbowFor === P.id && P.drawn === TrackCard.Elbow && !canPlaceElbowNow(P.id)) {
-      state.forceElbowFor = null;
-    }
-
-    // (Do not reset skip counters here; they persist across turns
-    //  and are only cleared by a successful placement/rotation.)
-    endTurn();
-    // Release AI lock at end of turn driver
-    state.aiBusy = false;
-
-    // --- Watchdog: if forcePlace is active and a legal placement exists, finalize it now ---
-    if (state.forcePlace && P.drawn && canPlaceDrawnNow(P.id)) {
-      const ok = aiForceCommitDrawn(P.id);
-      if (ok) {
-        await sleep(aiSleepTime);
-      } else {
-        state.forcePlace = false;
       }
+      // Step 4: (very conservative) die roll for rotation
+      await sleep(aiSleepTime);
+      if (!P.rollUsed && !P.tokenUsed && shouldConsiderDieRoll(P)) {
+        // --- Step 4: if we still have a drawn card, prefer to place/bottom.
+        // (…omitted for brevity…)
+        // If no drawn card / nothing to do, consider a die rotation —
+        // but only if recent rotations actually helped.
+        const probe = aiChooseTokenAction(P.id);
+        if (!probe) {
+          // Small per-player "rotation budget": aborted if past failures.
+          // Reset whenever we make progress (placement or token move).
+          P._failedRotationTurns = (P._failedRotationTurns|0);
+          if (P._failedRotationTurns >= 2) {
+            setStatus(`${P.name}: skipping die — recent rotations didn’t help`);
+          } else {
+            rollDie(); await sleep(aiSleepTime);
+            if (state.die && state.die !== 'X') {
+              applyRotation(); await sleep(aiSleepTime2);
+              // Re-evaluate token action after rotation
+              const again = aiChooseTokenAction(P.id);
+              // If rotation did not unlock any move, count it as a failure.
+              if (!again) {
+                P._failedRotationTurns++;
+              }
+              // If it *did* unlock movement, we’ll reset the counter below.
+              if (again) {
+                tokenMode(); await sleep(aiSleepTime);
+                if (again.type === 'move') {
+                  P._failedRotationTurns = 0;
+                  pushHistory('Token: move');
+                  state.board[again.from.y][again.from.x].token = null;
+                  const oppId = opponentCornerAt(again.to.x, again.to.y, P.id);
+                  if (oppId != null) {
+                    currentPlayer().reached ||= new Set();
+                    currentPlayer().reached.add(PLAYERS[oppId].name);
+                    recordFinishIfNew(currentPlayer());
+                    currentPlayer().tokensRemoved = Math.min(TOKENS_MAX, (currentPlayer().tokensRemoved|0)+1);
+                  } else {
+                    state.board[again.to.y][again.to.x].token = P.id;
+                  }
+                  currentPlayer().tokenUsed = true;
+                  if (!state.aiVisitedThisTurn) state.aiVisitedThisTurn = new Set();
+                  state.aiVisitedThisTurn.add(`${again.to.x},${again.to.y}`);
+                  if (!state.aiLastHop) state.aiLastHop = new Map();
+                  state.aiLastHop.set(currentPlayer().id, `${again.to.x},${again.to.y}`);
+                }
+                state.phase='idle'; state.subphase=null; render(); updateHUD();
+              }
+            }
+          }
+        }
+      }
+
+      // --- Step 5: waive impossible force placement and end turn ---
+      if (state.forcePlace) {
+        const tgs = aiListLegalTargets(P.id);
+        if (!tgs || !tgs.length) state.forcePlace = false;
+      }
+      if (state.forceElbowFor === P.id && P.drawn === TrackCard.Elbow && !canPlaceElbowNow(P.id)) {
+        state.forceElbowFor = null;
+      }
+
+      // (Do not reset skip counters here; they persist across turns
+      //  and are only cleared by a successful placement/rotation.)
+      endTurn();
+
+      // --- Watchdog: if forcePlace is active and a legal placement exists, finalize it now ---
+      if (state.forcePlace && P.drawn && canPlaceDrawnNow(P.id)) {
+        const ok = aiForceCommitDrawn(P.id);
+        if (ok) {
+          await sleep(aiSleepTime);
+        } else {
+          state.forcePlace = false;
+        }
+      }
+    } finally {
+      // Absolute safety net: never leave the UI locked if anything threw
+      state.aiBusy = false;
+      setAIThinking(false);
+      try { render(); } catch(_) {}
+      try { updateHUD && updateHUD(); } catch(_) {}
     }
   }
 
@@ -2284,6 +2541,7 @@ function loadSetupFromStorage(){
     // Reset undo/redo
     state.history = []; state.redo = [];
     state.turnHistory = []; state.turnRedo = [];
+    state.finishOrder = [];
     // Clear AI hop/edge memory for a fresh game
     state.aiLastHop  = new Map();
     state.aiLastEdge = new Map();
@@ -2297,6 +2555,7 @@ function loadSetupFromStorage(){
     updateUndoButtons();
 
     setStatus('New Game → Draw → Place. First placement is your corner.');
+    hideSoloAIPrompt();
     state.rotAnims = [];
     state.ghostRotAnim = null;
     state._animating = false;
@@ -2397,7 +2656,15 @@ function loadSetupFromStorage(){
     // --- end Dead-Straight Fix ---
     updateHUD();
 
-    // === AI entry point: if this player is AI, take the entire turn now ===
+    // === AI entry point ===
+    // If only one *unfinished* AI remains in the game, pause and ask the user.
+    if (P.ai && onlyOneAILeft() && !state.soloAIResumed){
+      setAIThinking(false);
+      showSoloAIPrompt();
+      updateHUD();
+      return; // do NOT auto-run the AI until user clicks Continue
+    }
+    hideSoloAIPrompt();    
     if (P.ai) {
       // Small timeout to let the HUD render the start of turn before actions
       if (state.aiTimer) { try { clearTimeout(state.aiTimer); } catch(e) {} }
@@ -2732,13 +2999,62 @@ function loadSetupFromStorage(){
     refreshBoardSaturation();
   }
 
+  // Build a set of “friendly” cells for player pid:
+  // your corner-connected network PLUS any network you’re currently on via tokens.
+  function friendlyNetSet(pid){
+    const set = new Set();
+    // Corner-connected network (ownership-agnostic once connected)
+    for (const p of connectedTrackFromCorner(pid)) {
+      set.add(`${p.x},${p.y}`);
+    }
+    // Any components reachable from each of my tokens (may be on opponent tiles)
+    for (const t of allTokensOf(pid)) {
+      for (const p of connectedTrackFrom(t.x, t.y)) {
+        set.add(`${p.x},${p.y}`);
+      }
+    }
+    return set;
+  }
+
+  // Return true if there exists ANY non-friendly track cell within Manhattan <= radius
+  // of your friendly network (corner net ∪ token nets). Used to justify rotations.
+  function hasNearbyForeignTracks(pid, radius = 2){
+    const net = friendlyNetSet(pid);
+    if (net.size === 0) return false;
+    const seen = new Set();
+    const q = [];
+    for (const k of net) {
+      const [x,y] = k.split(',').map(n => n|0);
+      q.push({x,y,d:0});
+      seen.add(k);
+    }
+    const inNet = (x,y)=> net.has(`${x},${y}`);
+    while (q.length){
+      const {x,y,d} = q.shift();
+      if (d > radius) continue;
+      // Check this ring for foreign tracks
+      const c = state.board[y]?.[x];
+      if (c && c.track && !inNet(x,y) && c.owner !== pid) return true;
+      // Expand 4-neighborhood
+      for (const [dx,dy] of [[1,0],[-1,0],[0,1],[0,-1]]){
+        const nx = x+dx, ny = y+dy;
+        if (!within(nx,ny)) continue;
+        const k2 = `${nx},${ny}`;
+        if (seen.has(k2)) continue;
+        seen.add(k2);
+        q.push({x:nx, y:ny, d:d+1});
+      }
+    }
+    return false;
+  }  
+
   // For a hypothetical placement, count total reciprocal attachments, and how many are "friendly"
   // (friendly = neighbor owned by pid OR neighbor in pid's corner-connected network).
   function aiAttachmentBreakdown(type, rot, x, y, pid){
     let total = 0, friendly = 0;
     const opens = rotatedOpeningsType(type, rot);
-    const net = connectedTrackFromCorner(pid);
-    const netSet = new Set(net.map(p => `${p.x},${p.y}`));
+    // FRIENDLY = corner-connected net ∪ every component reachable from any of my tokens
+    const netSet = friendlyNetSet(pid);    
     for (const [dx,dy] of opens){
       const nx = x+dx, ny = y+dy;
       if (!within(nx,ny)) continue;
@@ -2746,24 +3062,61 @@ function loadSetupFromStorage(){
       if (!n || !n.track) continue;
       if (!hasReciprocalTypes(type, rot, n.track, n.rot, dx, dy)) continue;
       total++;
-      if (n.owner === pid || netSet.has(`${nx},${ny}`)) friendly++;
+      // Directly friendly?
+      let isFriendly = (n.owner === pid) || netSet.has(`${nx},${ny}`);
+      // NEW: if not, consider the neighbor's full connected component
+      if (!isFriendly){
+        const comp = connectedTrackFrom(nx, ny);
+        for (const p of comp){
+          if (netSet.has(`${p.x},${p.y}`)) { isFriendly = true; break; }
+          const c = state.board[p.y][p.x];
+          if (c && c.owner === pid) { isFriendly = true; break; }
+        }
+      }
+      if (isFriendly) friendly++;
     }
     return { total, friendly };
   }
 
-  // True if (x,y) touches any track that is "friendly" to pid:
-  // owned by pid OR inside pid's corner-connected network (ownership-agnostic once connected).
+  // True if (x,y) is adjacent to anything "friendly":
+  //  • directly owned by pid,
+  //  • in pid's friendly set (corner net ∪ all token-connected nets), OR
+  //  • NEW: any immediate neighbor whose *connected component* intersects pid's
+  //    friendly set or an owned tile (captures whole-network adjacency).
   function hasFriendlyNeighbor(x, y, pid){
-    const net = connectedTrackFromCorner(pid);
-    const netSet = new Set(net.map(p => `${p.x},${p.y}`));
+    const netSet = friendlyNetSet(pid);
     const dirs = [[1,0],[-1,0],[0,1],[0,-1]];
     for (const [dx,dy] of dirs){
       const nx = x+dx, ny = y+dy;
       if (!within(nx,ny)) continue;
       const n = state.board[ny][nx];
       if (!n || !n.track) continue;
-      if (n.owner === pid) return true;
-      if (netSet.has(`${nx},${ny}`)) return true;
+      // Direct checks
+      if (n.owner === pid || netSet.has(`${nx},${ny}`)) return true;
+      // NEW: check the neighbor's whole connected component
+      const comp = connectedTrackFrom(nx, ny);
+      for (const p of comp){
+        if (netSet.has(`${p.x},${p.y}`)) return true;
+        const c = state.board[p.y][p.x];
+        if (c && c.owner === pid) return true;
+      }
+    }
+    return false;
+  }
+
+  // Helper: is the cell (x,y) itself inside my connected network OR orthogonally adjacent to it?
+  // Used to keep RS/RE/RT rotations local to my current plans (no random far-away twiddles).
+  function isInOrAdjacentToNet(x, y, pid){
+    const net = connectedTrackFromCorner(pid);
+    if (!net.length) return false;
+    const key = (p)=>`${p.x},${p.y}`;
+    const set = new Set(net.map(key));
+    if (set.has(`${x},${y}`)) return true;
+    const neigh = [[1,0],[-1,0],[0,1],[0,-1]];
+    for (const [dx,dy] of neigh){
+      const nx=x+dx, ny=y+dy;
+      if (!within(nx,ny)) continue;
+      if (set.has(`${nx},${ny}`)) return true;
     }
     return false;
   }
@@ -3456,6 +3809,9 @@ function checkForceElbow(P){
     render();
   });
   canvasEl.addEventListener('click', (e)=>{
+    // Block human interactions while AI is executing its turn
+    const cp = currentPlayer && currentPlayer();
+    if (state.lockInput && cp && cp.ai){ toast('AI is acting — please wait.'); return; }
     if(state.turnAdvancing) return;
     const rect=canvasEl.getBoundingClientRect(); const {x,y}=toCell(e.clientX-rect.left, e.clientY-rect.top);
     if(x<0||y<0||x>=state.N||y>=state.N) return;
@@ -3781,6 +4137,7 @@ function checkForceElbow(P){
           if (!P.reached) P.reached = new Set();
           const oppName = PLAYERS[oppId].name;
           P.reached.add(oppName);
+          recordFinishIfNew(P);
           // 3) Do NOT leave our token on the destination (corner stays with its owner’s token if present)
           if (state.board[y][x].token === P.id) {
             state.board[y][x].token = null;
@@ -3930,17 +4287,29 @@ function checkForceElbow(P){
   // Sort by score DESC, keep stable by pid
   function computeStandings(){
     const rows = collectScores();
-    rows.sort((a,b) => (b.score - a.score) || (a.pid - b.pid));
-    // Assign places with ties (T-1st, T-2nd, etc.)
-    let place = 1;
-    for (let i=0; i<rows.length; i++){
-      if (i>0 && rows[i].score < rows[i-1].score) place = i+1;
-      rows[i].place = place;
+    const order = Array.isArray(state.finishOrder) ? state.finishOrder.slice() : [];
+    const byPid = new Map(rows.map(r => [r.pid, r]));
+
+    // A) Finished players in recorded finish order
+    const finishedOrdered = [];
+    for (const pid of order){
+      const r = byPid.get(pid);
+      if (r && r.score >= 3) finishedOrdered.push(r);
     }
-    // Mark who is tied for 1st (bold all leaders)
-    const topScore = rows.length ? rows[0].score : 0;
-    rows.forEach(r => { r.isLeader = (r.score === topScore && topScore > 0) || (r.place === 1 && topScore === 0); });
-    return rows;
+    // Include any finished players not in finishOrder (e.g., legacy saves), pid-stable
+    const finishedUnordered = rows
+      .filter(r => r.score >= 3 && !order.includes(r.pid))
+      .sort((a,b) => a.pid - b.pid);
+
+    // B) Unfinished players by score (desc), pid-stable
+    const unfinished = rows
+      .filter(r => r.score < 3 && !order.includes(r.pid))
+      .sort((a,b) => (b.score - a.score) || (a.pid - b.pid));
+
+    const arranged = [...finishedOrdered, ...finishedUnordered, ...unfinished];
+    arranged.forEach((r,i) => r.place = i+1);      // unique places 1..N
+    arranged.forEach(r => { r.isLeader = (r.place === 1); });
+    return arranged;
   }
 
   function renderStandingsTop(){
@@ -4407,6 +4776,8 @@ function checkForceElbow(P){
       el.textContent = 'Score: ' + (reached ? reached.size : 0) + '/3' + (list?(' ['+list+']'):'');
     })();
     render();
+    // Ensure standings reflect per-player scores & correct ordinals
+    renderStandingsAccurate();    
   }
 
   function render(){

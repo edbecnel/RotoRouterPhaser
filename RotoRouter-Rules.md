@@ -174,7 +174,18 @@ If your own home corner is sealed by perpendicular Straights:
 
 - **Targeting:** moves toward the last unreached corner; avoids short loops.
 - **Rotation gating:** rolls the die to rotate <b>only after</b> probing for a legal token action; no pre-emptive rotations.
+- **Exploratory move:** if rotations from the same cell don’t help, the AI will try a short move to a nearby branching spot before another die roll.
+- **No-op tolerance:** when neither a token move nor a rotation would improve connectivity, the AI may Bottom and end the turn.
+- **Legality:** same adjacency rules as human players; no placement that only “touches” opponent networks without connecting.
 - **Stall recovery:** at most one die rotation per stall cycle, then re-evaluate.
 - **Legality:** same adjacency rules as humans; won’t place tiles that only touch opponents without connecting.
 - **Card economy:** prefers to save RS/RE/RT/RC for endgame; Bottoms weak cards only when not forced.
 - **Save/Load:** AI memory and counters persist in snapshots.
+
+---
+
+## Solo-AI Pause
+
+- When only **one AI player** remains and all human players are finished, the game **pauses** and shows:
+- > “There is only one AI player left. If you wish to stop now, click **New Game**, or press **Continue** to proceed.”
+- Press **Continue** to resume AI play; the banner and button disappear. You can always click **New Game** instead.
