@@ -8,6 +8,20 @@ A tactical route-building board game with optional AI players.
 
 ## What’s new (Oct 13, 2025)
 
+## New: Token Visibility Toggle (Hide/Unhide)
+
+You can now quickly hide all tokens to view the track layout unobstructed.
+
+- **Where:** Tokens panel in the sidebar.
+- **How:** Click **Hide** to hide all tokens; the button switches to **Unhide**.
+- **Scope:** Hiding persists for the **rest of your current turn** unless you manually unhide.
+- **Auto-unhide:** If you click **Token Action**, tokens are immediately made visible again and the button reverts to **Hide**.
+- **Keyboard shortcuts:**
+  - **H** — Hide tokens
+  - **U** — Unhide tokens
+
+> Note: Hiding affects **visuals only**; it does **not** change reachability or legal move checks.
+
 ### AI: rotation gating, exploration, and no-op tolerance
 
 - **Rotation gating:** the AI **only rolls the die** after first probing for a legal token move and only when a rotation is likely to help.

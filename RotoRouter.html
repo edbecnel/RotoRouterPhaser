@@ -109,6 +109,8 @@
         <div class="row"><b>Token</b></div>
         <div class="row">
           <button class="btn" id="tokenBtn">Token Action</button>
+          <!-- In the Tokens row, right after the Token Action button -->
+          <button class="btn" id="toggleTokensBtn" title="Hide/Unhide all tokens (H/U)">Hide</button>
           <span id="tokenTag" class="tag">Token: Ready</span>
           <span id="skippedTag" class="tag">Skipped: 0/3</span>
           <span id="elbowSkippedTag" class="tag">Elbows Skipped: 0/3</span>
@@ -254,6 +256,22 @@ function loadSetupFromStorage(){
     state.pausedForSoloAI = false;
   }
 
+  // --- Token visibility toggle (UI helper) ---
+  function setTokensHidden(on){
+    state.tokensHidden = !!on;
+    state.tokensHiddenFor = state.tokensHidden ? currentPlayer().id : null;
+    updateHUD();
+    render();
+  }
+  function ensureTokensVisible(){
+    if (state.tokensHidden){
+      state.tokensHidden = false;
+      state.tokensHiddenFor = null;
+      updateHUD();
+      render();
+    }
+  }
+
   // Count unfinished players (excludes finished and those totally out of tokens)
   function countIncomplete(){ 
     let ai=0, human=0;
@@ -367,6 +385,25 @@ function loadSetupFromStorage(){
       if (state.lockInput && cur && cur.ai){ e.stopPropagation(); e.preventDefault(); }
     }catch(_){}
   }, true);
+
+  window.addEventListener('keydown', (e) => {
+    // Ignore when typing in inputs
+    const ae = document.activeElement;
+    if (ae && /input|textarea|select/i.test(ae.tagName)) return;
+
+    const P = currentPlayer();
+    if (!P || P.ai) return;        // human only
+    if (state.aiBusy) return;      // not during AI animations/turns
+
+    if (e.key === 'h' || e.key === 'H') {
+      setTokensHidden(true);
+      e.preventDefault();
+    } else if (e.key === 'u' || e.key === 'U') {
+      setTokensHidden(false);
+      e.preventDefault();
+    }
+  });
+ 
 
   // Keep “Skipped” HUD tags in sync with the current player's counters
   function refreshSkipTags(){
@@ -2556,6 +2593,8 @@ function loadSetupFromStorage(){
 
     setStatus('New Game → Draw → Place. First placement is your corner.');
     hideSoloAIPrompt();
+    state.tokensHidden = false;
+    state.tokensHiddenFor = null;
     state.rotAnims = [];
     state.ghostRotAnim = null;
     state._animating = false;
@@ -2599,6 +2638,9 @@ function loadSetupFromStorage(){
     }
 
     const P = currentPlayer();
+    // Reset any per-turn token masking
+    state.tokensHidden = false;
+    state.tokensHiddenFor = null;
     resetTurnHistory();
     P.drawLocked=false; P.drawUsed=false; P.tokenUsed=false; P.rollUsed=false;
     P.rotatedThisTurn = false;  // track meaningful board action
@@ -4227,6 +4269,16 @@ function checkForceElbow(P){
   btn('rotateCCWBtn').addEventListener('click', ()=>rotatePreview(-90));
   btn('rotateCWBtn').addEventListener('click',  ()=>rotatePreview(+90));
   btn('tokenBtn').addEventListener('click', tokenMode);
+  // Auto-unhide when entering Token Action
+  btn('tokenBtn').addEventListener('click', () => {
+    ensureTokensVisible();
+  });
+  // Toggle button for Hide/Unhide
+  btn('toggleTokensBtn').addEventListener('click', () => {
+    const P = currentPlayer();
+    // Only meaningful for the human player's turn
+    if (P && !P.ai) setTokensHidden(!state.tokensHidden);
+  });
   btn('rollBtn').addEventListener('click', rollDie);
   btn('applyBtn').addEventListener('click', applyRotation);
   UI.vizEdges().addEventListener('change', render);
@@ -4488,6 +4540,16 @@ function checkForceElbow(P){
     renderStandingsTop();
 
     const P=currentPlayer();
+
+    // Update Hide/Unhide button state and label
+    (function(){
+      const b = document.getElementById('toggleTokensBtn');
+      if (!b) return;
+      const hidden = !!state.tokensHidden;
+      b.textContent = hidden ? 'Unhide' : 'Hide';
+      // Prefer disabling during AI turns/thinking
+      b.disabled = (currentPlayer()?.ai === true) || !!state.aiBusy;
+    })();
 
     if (state.phase === 'deadFix'){
       const rotationsRemain = hasRotationInDeck(P);      // Keep the messaging visible while the selection is up
@@ -5128,6 +5190,8 @@ function checkForceElbow(P){
   }
 
   function drawToken(pid,x,y, alphaOverride){
+    // Hide all tokens while hidden for the current human player
+    if (state.tokensHidden) return;    
     const color = PLAYERS[pid].color; const cell=state.cell;
     const cx=x*cell+cell/2, cy=y*cell+cell/2; const r=cell/2-12;
     const a = (alphaOverride==null ? 0.75 : alphaOverride);

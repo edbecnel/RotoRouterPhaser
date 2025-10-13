@@ -113,6 +113,16 @@ _Tip:_ while a placement “ghost” is shown, use **Q/E** to rotate before conf
 
 ---
 
+## Token Visibility (Hide/Unhide)
+
+- Use the **Hide** button in the Tokens panel to temporarily hide all tokens and see tracks clearly.
+- While hidden, tokens remain hidden **until the end of your turn** (or until you click **Unhide**).
+- Opening **Token Action** instantly **Unhides** tokens and returns the button to **Hide**.
+- **Shortcuts:** **H** = Hide, **U** = Unhide.
+- This feature is purely visual—rules for movement, connections, and reachability are unchanged.
+
+---
+
 ## Bottoming (Recycle)
 
 **Bottoming** means moving the held card to the **bottom of your personal draw pile** (it is **recycled**, not discarded).
