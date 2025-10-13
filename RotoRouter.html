@@ -53,6 +53,7 @@
       font-weight: 600;  /* bold */
     }
     .ok { color:#28d07a; font-weight:700; }
+    .caution { color:#ffd166; font-weight:700; } /* yellow status text */
   </style>
 </head>
 <body>
@@ -248,7 +249,9 @@ function loadSetupFromStorage(){
     if (b){ b.style.display='inline-block'; b.disabled=false; }
     state.pausedForSoloAI = true;
     // Keep the comma attached to "New Game" and prefer non-breaking in the label
-    setStatus('There is only one AI player left. If you wish to stop now, click <b>New&nbsp;Game,</b> or press <b>Continue</b> to proceed.');    
+    setStatus(
+      '<span class="caution">There is only one AI player left. If you wish to stop now, click <b>New&nbsp;Game,</b> or press <b>Continue</b> to proceed.</span>'
+    );
   }
   function hideSoloAIPrompt(){
     const b = btn('continueBtn');
@@ -1666,6 +1669,16 @@ function loadSetupFromStorage(){
     state.aiLastHop = new Map();
     state.soloAIResumed = false;  // allow prompt again on a loaded game
 
+    // Backfill finishOrder for legacy/partial saves: include any already-finished players
+    state.finishOrder = Array.isArray(state.finishOrder)
+      ? state.finishOrder.filter((v, i, a) => a.indexOf(v) === i)
+      : [];
+    for (const p of state.players) {
+      if (playerHasFinished(p) && !state.finishOrder.includes(p.id)) {
+        state.finishOrder.push(p.id);
+      }
+    }
+
     // Recompute saturation immediately after restore
     refreshBoardSaturation();
 
@@ -1683,7 +1696,6 @@ function loadSetupFromStorage(){
       updateHUD();
     }
 
-
     if (opts && opts.fromHistory) {
       // After UNDO/REDO, re-enter fix phases (Corner Fix then Dead-Straight Fix) if eligible
       maybeEnterFixPhasesAfterHistory(opts.op);
@@ -1699,6 +1711,7 @@ function loadSetupFromStorage(){
     // ---- real file load path ----
     setStatus('Game loaded.');
     render();
+    updatePlacesFromFinishOrder(); // reflect any finishers immediately after load    
     startTurn();
     return;
   }
@@ -1879,6 +1892,21 @@ function loadSetupFromStorage(){
     return reached.size >= 3;
   }
 
+  // --- Places UI, driven ONLY by state.finishOrder (stable & persisted) ---
+  function ordinal(n){
+    const s=["th","st","nd","rd"], v=n%100;
+    return n + (s[(v-20)%10] || s[v] || s[0]);
+  }
+  function updatePlacesFromFinishOrder(){
+    const order = Array.isArray(state.finishOrder) ? state.finishOrder.slice() : [];
+    for (const p of state.players){
+      const cell = document.getElementById('place-' + p.id);
+      if (!cell) continue;
+      const idx = order.indexOf(p.id);
+      cell.textContent = (idx >= 0) ? ordinal(idx+1) : '—';
+    }
+  }
+
   // Record the order in which players complete 3/3 corners.
   // (Used to assign unique final places: 1st, 2nd, 3rd, 4th.)
   function recordFinishIfNew(P){
@@ -1886,6 +1914,7 @@ function loadSetupFromStorage(){
     if (!playerHasFinished(P)) return;
     state.finishOrder = Array.isArray(state.finishOrder) ? state.finishOrder : [];
     if (!state.finishOrder.includes(P.id)) state.finishOrder.push(P.id);
+    updatePlacesFromFinishOrder(); // keep the table immediately in sync
   }
 
   // BFS for token moves — by default do NOT pass through any tokens.
@@ -2282,7 +2311,7 @@ function loadSetupFromStorage(){
               if (!P.reached) P.reached = new Set();
               const oppName = PLAYERS[oppId].name;
               P.reached.add(oppName);
-              recordFinishIfNew(oppName);
+              recordFinishIfNew(P); // <-- pass the scoring PLAYER, not the opponent's name
               if (state.board[action.to.y][action.to.x].token === P.id) {
                 state.board[action.to.y][action.to.x].token = null;
               }
@@ -2703,7 +2732,8 @@ function loadSetupFromStorage(){
     if (P.ai && onlyOneAILeft() && !state.soloAIResumed){
       setAIThinking(false);
       showSoloAIPrompt();
-      updateHUD();
+      // Avoid updateHUD here; it can overwrite the pause message.
+      render();
       return; // do NOT auto-run the AI until user clicks Continue
     }
     hideSoloAIPrompt();    
@@ -4839,7 +4869,8 @@ function checkForceElbow(P){
     })();
     render();
     // Ensure standings reflect per-player scores & correct ordinals
-    renderStandingsAccurate();    
+    renderStandingsAccurate();
+    updatePlacesFromFinishOrder();    
   }
 
   function render(){
