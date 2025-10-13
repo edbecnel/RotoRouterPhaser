@@ -47,6 +47,11 @@ RS/RE/RT/RC scale with the deck as well. Decks are generated at **New Game** usi
 - **RT** — rotate an existing **T** _or_ place a new **T**
 - **RC** — replace _any_ existing tile with a **Cross** _or_ place a new **Cross**
 
+**Track colors**
+
+- New tracks use the **placing player’s color**.
+- When **RC** replaces an existing tile, the Cross **keeps the replaced tile’s color**; RC into an empty cell uses the placing player’s color.
+
 _Tip:_ while a placement “ghost” is shown, use **Q/E** to rotate before confirming.
 
 ---
@@ -69,6 +74,7 @@ _Tip:_ while a placement “ghost” is shown, use **Q/E** to rotate before conf
 - **3 Skipped Tracks**: If you skip 3 track cards in a row, on your **next turn** you must **Draw and Place** the card drawn (if legal). Bottom and End Turn are disabled until you place it.
 - **3 Skipped Elbows**: If you skip 3 Elbows, the **next Elbow drawn must be placed** immediately (if legal). Bottom and End Turn are disabled until the Elbow is placed.
 - If a forced card has **no legal placement**, the force is **waived** — you may Bottom it and end your turn normally.
+- **HUD reset:** when the Elbow-skip counter returns to **0/3** (or the force is waived), the warning style clears and the counter returns to its normal color.
 - **Undo safety:** if you Undo during a forced turn, the forced state remains active and **Bottom/End Turn** stay disabled until the card is placed or the force is waived.
 - **HUD banner:** at the start of a forced turn the status shows **“Forced: Draw & Place”** before drawing.
 
@@ -166,8 +172,9 @@ If your own home corner is sealed by perpendicular Straights:
 
 ## AI Players
 
-- **Targeting:** moves toward the last unreached corner and lingers near leverage joints to prepare for die rotations.
-- **Legality:** follows the same adjacency rule as human players; cannot place tiles that touch an opponent’s network without connecting.
-- **Stall recovery:** when no progress occurs, cycles one card and performs a single die rotation before re-evaluating.
-- **Card economy:** saves RS/RE/RT/RC for endgame; Bottoms weak cards only when not forced.
+- **Targeting:** moves toward the last unreached corner; avoids short loops.
+- **Rotation gating:** rolls the die to rotate <b>only after</b> probing for a legal token action; no pre-emptive rotations.
+- **Stall recovery:** at most one die rotation per stall cycle, then re-evaluate.
+- **Legality:** same adjacency rules as humans; won’t place tiles that only touch opponents without connecting.
+- **Card economy:** prefers to save RS/RE/RT/RC for endgame; Bottoms weak cards only when not forced.
 - **Save/Load:** AI memory and counters persist in snapshots.

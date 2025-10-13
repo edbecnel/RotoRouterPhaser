@@ -88,6 +88,12 @@
 
     <p class="tip"><i>Tip:</i> While a placement “ghost” is shown, use <b>Q</b>/<b>E</b> to rotate before confirming.</p>
 
+    <h3>Track colors</h3>
+    <ul>
+      <li>Newly placed tracks adopt the <b>placing player’s color</b>.</li>
+      <li><b>RC on an existing tile</b>: the Cross <b>keeps the replaced tile’s color</b>. (RC into an empty cell uses the placing player’s color.)</li>
+    </ul>
+
     <h2>Turn Flow</h2>
     <ol>
       <li><b>Draw</b> a card (if you don’t already hold one).</li>
@@ -105,10 +111,11 @@
     <p class="tip"><i>Forced play:</i> If a forced card has <b>no legal placement</b>, the force is <b>waived</b>; you may Bottom it.</p>
     <h2>AI Players</h2>
       <ul>
-        <li><b>Targeting:</b> moves toward the last unreached corner and lingers near key elbows/straights before leaving.</li>
-        <li><b>Legality:</b> the AI now follows the same adjacency rules as players—its tracks must attach to its own network or to a connected joint network. It will not place tiles that only touch opponent tracks without connecting.</li>
-        <li><b>Stall recovery:</b> when progress stalls, the AI cycles one card and performs at most one die rotation before re-evaluating.</li>
-        <li><b>Card economy:</b> holds RS/RE/RT/RC for endgame; Bottoms low-value cards only when not forced.</li>
+        <li><b>Targeting:</b> moves toward the last unreached corner; avoids short loops.</li>
+        <li><b>Rotation gating:</b> the AI <b>only rolls to rotate after probing</b> for a legal token move. If a legal move exists, it will not roll pre-emptively.</li>
+        <li><b>Stall recovery:</b> when progress stalls, the AI cycles one card and performs <b>at most one</b> die rotation before re-evaluating.</li>
+        <li><b>Legality:</b> follows the same adjacency rules as players; won’t place tiles that only touch opponent tracks without connecting.</li>
+        <li><b>Card economy:</b> prefers saving RS/RE/RT/RC for endgame; Bottoms low-value cards only when not forced.</li>
         <li><b>Save/Load safe:</b> AI flags and counters persist in saved games.</li>
       </ul>
     <h2>Forced Play Rules</h2>
@@ -116,6 +123,7 @@
       <li><b>3 Skipped Tracks:</b> If you skip 3 track cards in a row, on your <b>next turn</b> you must <b>Draw and Place</b> the card drawn (if there is a legal placement). Bottom and End Turn are disabled until you place it.</li>
       <li><b>3 Skipped Elbows:</b> If you skip 3 Elbows, the <b>next Elbow you draw must be placed</b> immediately (if there is a legal placement). Bottom and End Turn are disabled until the Elbow is placed.</li>
       <li>If the forced card has <b>no legal placement</b>, the force is <b>waived</b> to avoid deadlocks — you may Bottom it and end your turn normally.</li>
+      <li><b>HUD reset:</b> when the elbow-skip counter returns to <b>0/3</b> (or the force is waived), the warning style clears and the counter returns to its normal color.</li>
       <li><b>Undo safety:</b> Undo/Redo during a forced turn preserves the forced state. <b>Bottom</b> remains disabled until you complete or waive the forced placement.</li>
       <li><b>HUD banner:</b> During a forced turn, the status line now shows <b>“Forced: Draw &amp; Place”</b> before you draw.</li>
     </ul>

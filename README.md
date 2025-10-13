@@ -4,6 +4,31 @@ A tactical route-building board game with optional AI players.
 
 ---
 
+---
+
+## What’s new (Oct 13, 2025)
+
+### Track colors
+
+- Newly placed tracks now adopt the **placing player’s color** for their line art.
+- **RC** (Replace with Cross) keeps the **original tile’s color** when replacing an existing tile (the Cross inherits the replaced tile’s color), but uses the **placing player’s color** when placing RC into an empty cell.
+
+### AI: rotation gating & anti-bounce
+
+- **Rotation gating:** the AI **only rolls the die to rotate after first probing for a legal token action**. If a legal move exists, it will not roll pre-emptively. (Prevents rotating immediately after placing a corner T.)
+- **Single-rotation per stall cycle:** when stuck, the AI will at most perform **one rotation**, then re-evaluate.
+- **Anti-bounce memory:** remembers last hop and a per-turn visited set to avoid A↔B oscillation (“ping-pong”).
+
+### Forced play / HUD polish
+
+- If **3 elbows were skipped**, the next drawn Elbow must be placed (if legal). If that state is cleared or waived, the **warning style is removed** and the counter returns to its normal color.
+- If a forced card has **no legal placement right now**, the force is **waived** so play can continue.
+
+### Bug fixes
+
+- Fixed cases where the AI could “ping-pong” between two tracks without ever attempting a rotation.
+- Fixed elbow-skip banner not clearing its red/warn styling when the counter reset to **0/3**.
+
 ## What’s new (Oct 2025)
 
 ### Gameplay/UI

@@ -233,16 +233,24 @@ function loadSetupFromStorage(){
   const tokenTag=()=>tag('tokenTag');
   const tokenCount=()=>tag('tokenCount');
   const btn=(id)=>document.getElementById(id);
+  
   // Keep “Skipped” HUD tags in sync with the current player's counters
   function refreshSkipTags(){
     const P = currentPlayer && currentPlayer();
     if (!P) return;
     const s = document.getElementById('skippedTag');
     const e = document.getElementById('elbowSkippedTag');
-    if (s) s.textContent = `Skipped: ${P.skipCount|0}/3`;
-    if (e) e.textContent = `Elbows Skipped: ${P.elbowSkipCount|0}/3`;
+    if (s) {
+      s.textContent = `Skipped: ${P.skipCount|0}/3`;
+      // Optional: show red only when general skip force is active next turn
+      if ((P.skipCount|0) >= 3) s.classList.add('warn'); else s.classList.remove('warn');
+    }
+    if (e) {
+      e.textContent = `Elbows Skipped: ${P.elbowSkipCount|0}/3`;
+      // Red only while at/over the elbow force threshold
+      if ((P.elbowSkipCount|0) >= 3) e.classList.add('warn'); else e.classList.remove('warn');
+    }
   }
- 
 
   // Colors & constants
   const COLORS={ bg:'#0b0f18', grid:'#263145', gear:'#202a3d', track:'#6d7aa6', block:'#434b63', slot:'#a8b7ff', hilite:'#9efff4', tokenR:'#ff6b6b', tokenG:'#6bff95', tokenB:'#6bd9ff', tokenY:'#ffef6b', edge:'#f4b86a', hint:'#c7f0ff' };
@@ -773,7 +781,9 @@ function loadSetupFromStorage(){
     return true;
   }
 
-  // Token: find a scoring move if one exists; else step closer to any opponent corner
+  // Token: find a scoring move if one exists; else step closer to any opponent corner.
+  // Will not "ping-pong" between two tiles; if no strictly-progressing move exists,
+  // returns null so the caller can try rotations (die) before card actions.
   function aiChooseTokenAction(pid){
     // First look for any token with a path to a scoring corner
     const myTokens = allTokensOf(pid);
@@ -786,7 +796,8 @@ function loadSetupFromStorage(){
     // Only target corners that have not been reached yet
     const unreachedCorners = oppCorners.filter(oc => {
       const owner = PLAYERS.find(pl => cornerFor(pl.id).x === oc.x && cornerFor(pl.id).y === oc.y);
-      return !P.reached?.has(owner?.name);
+      const rset  = P.reached ? (P.reached instanceof Set ? P.reached : new Set(P.reached)) : new Set();
+      return !rset.has(owner?.name);
     });
 
     // Fallback: if all corners reached (shouldn’t happen but safe)
@@ -803,9 +814,8 @@ function loadSetupFromStorage(){
       if (scorer) return { type:'move', from:t, to:scorer };
 
       // 2) Otherwise, pick a move that *progresses* toward any un-reached corner.
-      //    Prefer strictly closer moves; if none exist, allow equal-distance but avoid bouncing back.
-       // Build corner targets with emphasis on the player's *unreached* corners.
-      // If only one unreached corner remains, call it the "last" and give it higher weight.
+      //    Prefer strictly closer moves; if none exist, DO NOT move (let caller try a rotation).
+      //    Also avoid immediately returning to the previous hop (anti ping-pong).
       const allOCs = opponentCorners(pid);
       const reachedSet = (P.reached instanceof Set ? P.reached : (P.reached ? new Set(P.reached) : new Set()));
       const unreachedOCs = allOCs.filter(oc => {
@@ -816,7 +826,12 @@ function loadSetupFromStorage(){
       const targets = unreachedOCs.length ? unreachedOCs : allOCs;
       const d0 = Math.min(...targets.map(oc => manhattan(t, oc)));
       __devAssertFinite('ai.tokenTargeting.d0', d0);
+
+      // Where did we just land last time? (so we don’t bounce right back)
       const lastKey = state.aiLastHop?.get(pid) || null;
+      // What was the last traversed edge? (A→B blocks B→A immediately)
+      const lastEdge = state.aiLastEdge?.get(pid) || null;
+
       let bestScore = Infinity;
       for (const m of moves) {
         const dNear = Math.min(...targets.map(oc => manhattan(m, oc)));
@@ -825,12 +840,16 @@ function loadSetupFromStorage(){
           m.x, m.y, pid, lastTarget || targets[0]
         );
         const mk = `${m.x},${m.y}`;
+        const fromK = `${t.x},${t.y}`;
+        const revEdge = `${mk}|${fromK}`; // this move would reverse the last edge if equal        
         // Lower score is better: distance minus a small leverage bonus.
         const score = (lastTarget ? dLast * 1.25 : dNear) - 0.5 * leverage;
         __devAssertFinite('ai.tokenTargeting.loop', dNear, dLast, leverage, score);
-        const isAcceptable =
-          (dNear < d0) ||
-          (dNear === d0 && mk !== lastKey && !state.aiVisitedThisTurn.has(mk));
+        // Require strict improvement in distance to a target corner (no equal-distance hops).
+        // Also forbid hopping back to the last cell we came from this game turn (anti ping-pong).
+        const isBacktrackCell = (lastKey && mk === lastKey);
+        const isReverseEdge   = (lastEdge && lastEdge === revEdge);
+        const isAcceptable = (dNear < d0) && !isBacktrackCell && !isReverseEdge;
         if (isAcceptable && score < bestScore) { bestScore = score; best = m; }
       }
 
@@ -846,19 +865,8 @@ function loadSetupFromStorage(){
     const canPlaceNew = (lifetimePlaced < TOKENS_MAX) && cCell.track && cCell.token==null;
     // Prefer to ramp to at least 2 tokens on board when the corner is free
     if (canPlaceNew && onBoard < 2) return { type:'place', at: corner };
-    // Otherwise, pick any token that can move and step closer to the nearest opponent corner
-    best = null;  // reset from the earlier loop to avoid stale value
-    for (const t of myTokens){
-      const moves = reachableFrom(t, pid);
-      if (!moves.length) continue;
-      let bestScore = +Infinity;
-      for (const m of moves){
-        // distance to nearest opponent corner
-        const d = Math.min(...targetCorners.map(oc => manhattan(m, oc)));
-        if (d < bestScore){ bestScore = d; best = m; }
-      }
-      if (best) return { type:'move', from:t, to:best };
-    }
+    // Otherwise: if no strictly improving move exists, do NOT move.
+    // Returning null lets the caller try a rotation (die) to unlock paths.
 
     // If we couldn’t move any token, consider placing a new one (even if we already have some)
     if (canPlaceNew) return { type:'place', at: corner };
@@ -871,7 +879,7 @@ function loadSetupFromStorage(){
     });
 
     // If no reachable improvement and at least one unreached corner exists, flag stall
-    if (unreached.length && !best) {
+    if (unreached.length) {
       P._aiStalledTurns = (P._aiStalledTurns || 0) + 1;
     } else {
       P._aiStalledTurns = 0;
@@ -982,8 +990,10 @@ function loadSetupFromStorage(){
   };
 
   // AI: remember last landing to prevent ping-pong
-  state.aiLastHop = new Map(); // key: pid, val: "x,y"  
-  
+  state.aiLastHop = new Map(); // key: pid, val: "x,y"
+  // AI: remember the last traversed EDGE A→B to forbid the immediate reverse B→A
+  state.aiLastEdge = new Map(); // key: pid, val: "ax,ay|bx,by"
+
   const canvas=UI.canvas(); const ctx=canvas.getContext('2d');
 
   // ==== UNDO / REDO HELPERS ====
@@ -1339,6 +1349,7 @@ function loadSetupFromStorage(){
     // AI per-turn/transient memory should start clean after a load
     state.aiVisitedThisTurn = new Set();
     state.aiLastHop = new Map();
+    state.aiLastEdge = new Map();
 
     // --- Robust legacy backfill for token counts ---
     // Newer code treats:
@@ -1735,6 +1746,23 @@ function loadSetupFromStorage(){
     
     const P = currentPlayer();
 
+    // EARLY ROTATION GUARD:
+    // Do NOT roll the die before drawing/placing at the start of a turn.
+    // Only consider a pre-draw rotation if drawing is already consumed/locked this turn,
+    // or we are already holding a card (i.e., mid-hand), or the board is saturated.
+    if (!P.rollUsed && !P.tokenUsed &&
+        (P.drawUsed || P.drawLocked || P.drawn != null || state.boardSaturated)) {
+      const probeEarly = aiChooseTokenAction(P.id);
+      if (!probeEarly) {
+        rollDie();
+        await sleep(aiSleepTime2);
+        if (state.die && state.die !== 'X') {
+          applyRotation();
+          await sleep(aiSleepTime2);
+        }
+      }
+    }
+
     // --- Forced placement turn handling (prevents AI deadlock at 3/3) ---
     if (state.forcePlace && P && P.ai) {
       // 1) Ensure we have a drawn card
@@ -1814,6 +1842,35 @@ function loadSetupFromStorage(){
 
     // Step 2: If holding a card, try to place/rotate it; else continue
     if (P.drawn){
+      // --- FORCED ELBOW: must place now if legal --------------------------
+      if (state.forceElbowFor === P.id && P.drawn === TrackCard.Elbow && canPlaceElbowNow(P.id)) {
+        const targetsNow = aiListLegalTargets(P.id);
+        // Prefer the heuristic picker; fall back to first legal that reciprocally attaches
+        const pick = (typeof aiBestPlacementForDrawn === 'function')
+          ? aiBestPlacementForDrawn(P.id, targetsNow)
+          : null;
+        const fb   = pick ? null : aiFirstLegalPlacementForDrawn(P.id);
+        const chosen = pick
+          ? { x: pick.x, y: pick.y, rot: pick.rot }
+          : (fb ? { x: fb.at.x, y: fb.at.y, rot: fb.rot } : null);
+        if (chosen) {
+          placeMode(); // compute highlights
+          state.phase = 'place';
+          state.subphase = 'rotateNew';
+          state.rotateFocus = { x: chosen.x, y: chosen.y, original: 0 };
+          state.previewRot  = chosen.rot|0;
+          render();
+          await sleep(aiSleepTime);
+          placeMode(); // commit placement
+          // Clear elbow force after successful placement
+          P.elbowSkipCount = 0;
+          state.forceElbowFor = null;
+          await sleep(aiSleepTime);
+        } else {
+          // If something changed and it’s no longer placeable, waive the force to avoid deadlock
+          state.forceElbowFor = null;
+        }
+      }
       const D = P.drawn;
       // On full board, only rotations/replacements allowed — placeMode() already guards
       const targets = aiListLegalTargets(P.id);
@@ -1912,6 +1969,7 @@ function loadSetupFromStorage(){
     }
 
     // Step 3: Token action (only if still available and something sensible exists)
+    // If the move would not strictly improve distance, we skip it so we can rotate instead.
     if (!P.tokenUsed){
       const action = aiChooseTokenAction(P.id);
       if (action){
@@ -1968,11 +2026,14 @@ function loadSetupFromStorage(){
           btn('tokenBtn').disabled = true;
           state.phase='idle'; state.subphase=null; state.highlight=[]; state.tokenSelect=null;
 
-          // remember landing to prevent bounce loops
+          // remember landing to prevent bounce loops across turns
           if (!state.aiVisitedThisTurn) state.aiVisitedThisTurn = new Set();
           state.aiVisitedThisTurn.add(`${action.to.x},${action.to.y}`);
           if (!state.aiLastHop) state.aiLastHop = new Map();
           state.aiLastHop.set(P.id, `${action.to.x},${action.to.y}`);
+          // also remember the traversed edge A→B to forbid immediate reverse B→A next turn
+          if (!state.aiLastEdge) state.aiLastEdge = new Map();
+          state.aiLastEdge.set(P.id, `${action.from.x},${action.from.y}|${action.to.x},${action.to.y}`);
 
           render(); updateHUD();
         }
@@ -2023,7 +2084,7 @@ function loadSetupFromStorage(){
         }
       }
     }
-    // --- Step 4: conservative die roll — only if token still unused *and* no move exists ---
+    // --- Step 4: conservative die roll — only if token still unused *and* no progressing move exists ---
     await sleep(aiSleepTime);
     if (!P.rollUsed && !P.tokenUsed) {
       // Probe: if a legal token action exists already, don’t roll.
@@ -2074,9 +2135,53 @@ function loadSetupFromStorage(){
     // Release AI lock at end of turn driver
     state.aiBusy = false;
 
-    endTurn();
-    // Release AI lock at end of turn driver
-    state.aiBusy = false;
+    // --- Watchdog: if forcePlace is active and a legal placement exists, finalize it now ---
+    if (state.forcePlace && P.drawn && canPlaceDrawnNow(P.id)) {
+      const ok = aiForceCommitDrawn(P.id);
+      if (ok) {
+        await sleep(aiSleepTime);
+      } else {
+        state.forcePlace = false;
+      }
+    }
+  }
+
+  // Commit the currently drawn card immediately by using the first legal highlight.
+  // Chooses a rotation that yields at least one reciprocal connection if possible.
+  function aiForceCommitDrawn(pid){
+    const P = state.players[pid];
+    if (!P || !P.drawn) return false;
+
+    // Recompute legal highlights for the drawn card (don’t rely on stale UI state)
+    const prev = { phase: state.phase, subphase: state.subphase, highlight: state.highlight.slice() };
+    try {
+      state.phase='place'; state.subphase=null; state.highlight=[];
+      computePlaceHighlights();
+      const t = (state.highlight && state.highlight[0]) || null;
+      if (!t) return false;
+
+      const baseType = baseDrawnType(P.drawn);
+      // Pick a rotation that makes at least one reciprocal attachment; fall back to 0°
+      let rot = 0, bestDeg = -1;
+      for (const R of [0,90,180,270]){
+        const deg = aiDegreeIfPlaced(baseType, R, t.x, t.y);
+        if (deg > bestDeg){ bestDeg = deg; rot = R; }
+      }
+
+      // Commit via the same rotateNew path the UI uses
+      state.phase = 'place';
+      state.subphase = 'rotateNew';
+      state.rotateFocus = { x: t.x, y: t.y, original: 0 };
+      state.previewRot  = rot;
+      render(); // optional
+
+      // Confirm placement
+      placeMode();
+      return true;
+    } finally {
+      // placeMode() resets phase/subphase/highlight; nothing to restore
+      if (prev) void prev; // no-op; left here to show we intentionally don't restore
+    }
   }
 
   // Hypothetical path test: if we placed (type,rot) at (x,y), is there a reciprocal path
@@ -2179,8 +2284,9 @@ function loadSetupFromStorage(){
     // Reset undo/redo
     state.history = []; state.redo = [];
     state.turnHistory = []; state.turnRedo = [];
-    // Clear AI hop memory for a fresh game
-    state.aiLastHop = new Map();
+    // Clear AI hop/edge memory for a fresh game
+    state.aiLastHop  = new Map();
+    state.aiLastEdge = new Map();
     state.forcePlace = false;
     state.forceElbowFor = null;
     state.players.forEach(p => { p.skipCount = 0; p.elbowSkipCount = 0; });
@@ -2338,6 +2444,40 @@ function loadSetupFromStorage(){
   function endTurn(){
     // Block ending the turn if an Elbow is being forced and can be placed now.
     const P = currentPlayer();
+
+    // --- AI forced-placement safety net ---
+    // If an AI is being forced to place and is holding a card, try to auto-commit now.
+    if (P.ai && state.forcePlace && P.drawn) {
+      // Try the best-scored option first; if none, fall back to first legal.
+      const targetsNow = (typeof aiListLegalTargets === 'function') ? aiListLegalTargets(P.id) : [];
+      let committed = false;
+
+      if (targetsNow && targetsNow.length && typeof aiBestPlacementForDrawn === 'function') {
+        const pick = aiBestPlacementForDrawn(P.id, targetsNow);
+        if (pick) {
+          // Commit via the same rotateNew path the UI uses
+          state.phase = 'place';
+          state.subphase = 'rotateNew';
+          state.rotateFocus = { x: pick.x, y: pick.y, original: 0 };
+          state.previewRot  = pick.rot|0;
+          placeMode(); // confirm placement
+          committed = true;
+        }
+      }
+      if (!committed) {
+        // Fallback to first legal reciprocal rotation if scorer returned null
+        const ok = aiForceCommitDrawn(P.id);  // returns true if it committed one
+        committed = !!ok;
+      }
+
+      if (committed) {
+        // Placement satisfied the force; continue normal endTurn checks below
+        updateHUD(); render();
+      } else {
+        // If we truly can't place this card, waive the force so we don't deadlock
+        state.forcePlace = false;
+      }
+    }
 
     // NEW: if a force is active but this card cannot be placed, waive it now.
     if (state.forcePlace && P.drawn && !canPlaceDrawnNow(P.id)) {
@@ -2998,9 +3138,20 @@ function checkForceElbow(P){
       // Commit at the preview angle
       const placedType = baseDrawnType(P.drawn);
       pushHistory('Place/Replace');
+
+      // Preserve owner color if RC is replacing an existing track
+      const prevHadTrack = !!cell.track;
+      const prevOwner    = cell.owner;
+
       cell.track = placedType;
       cell.rot   = snap90(state.previewRot || 0);
-      cell.owner = P.id;
+      if (P.drawn === TrackCard.RCross && prevHadTrack) {
+        // RC replaces: keep the replaced track's color
+        cell.owner = prevOwner;
+      } else {
+        // New placement (or non-RC): adopt current player's color
+        cell.owner = P.id;
+      }
 
       P.deck.discard.push(P.drawn);
       P.drawn = null;
@@ -3516,22 +3667,31 @@ function checkForceElbow(P){
         return;
       }
 
-      // RC: Replaceable Cross — claim any existing track type on click
-      if (P.drawn===TrackCard.RCross && cell.track){
-        // (Rotation is irrelevant for Cross; keep current orientation or normalize to 0 if you prefer.)
+      // RC: Replaceable Cross — replace any existing track and KEEP the replaced tile's color
+      if (P.drawn === TrackCard.RCross && cell.track) {
         pushHistory('Place/Replace');
+        const prevOwner = cell.owner;      // preserve color
         cell.track = 'Cross';
-        cell.owner = P.id;
-        cell.rot = 0; // optional, Cross is symmetric
-        // cell.rot = 0; // optional: normalize
-        P.deck.discard.push(P.drawn); P.drawn = null;
+        cell.rot   = 0;                     // Cross is symmetric
+        cell.owner = (prevOwner != null ? prevOwner : P.id);
+
+        // discard card, clear force/skip counters, and commit
+        P.deck.discard.push(P.drawn);
+        P.drawn = null;
         P.skipCount = 0;
-        state.forcePlace = false;   // placing satisfies the force rule
+        state.forcePlace = false;
+
         pulse(x,y);
-        state.ghostRotAnim = null;
-        state.phase='idle'; state.highlight=[]; state.hover=null; state.previewRot=0;
-        onTopologyChanged();
-        render(); updateHUD(); setStatus('Track replaced with Cross (ownership changed).'); maybeAutoAdvance();
+        state.phase='idle';
+        state.subphase=null;
+        state.rotateFocus=null;
+        state.previewRot=0;
+        state.highlight=[];
+        state.hover=null;
+        if (typeof onTopologyChanged === 'function') onTopologyChanged();
+        render(); updateHUD();
+        setStatus('Replaced with Cross. You cannot draw again this turn.');
+        maybeAutoAdvance();
         return;
       }
 
@@ -4521,8 +4681,16 @@ function checkForceElbow(P){
       ctx.fillStyle='#434b63'; ctx.beginPath(); ctx.arc(0,0,r,0,Math.PI*2); ctx.fill();
       ctx.strokeStyle=COLORS.grid; ctx.lineWidth=2; ctx.beginPath(); ctx.arc(0,0,r,0,Math.PI*2); ctx.stroke();
     } else {
-      ctx.fillStyle=COLORS.track; ctx.beginPath(); ctx.arc(0,0,r,0,Math.PI*2); ctx.fill();
-      ctx.strokeStyle=COLORS.slot; ctx.lineWidth=6;
+      ctx.fillStyle = COLORS.track;
+      ctx.beginPath(); ctx.arc(0,0,r,0,Math.PI*2); ctx.fill();
+      // Stroke pipes using the owning player's color (fallback to slot color)
+      let ownerColor = COLORS.slot;
+      const cellObj = state.board && state.board[y] && state.board[y][x];
+      if (cellObj && Number.isInteger(cellObj.owner) && state.players[cellObj.owner]) {
+        ownerColor = state.players[cellObj.owner].color || ownerColor;
+      }
+      ctx.strokeStyle = ownerColor;
+      ctx.lineWidth = 6;      
       if(type==='Straight'){
         ctx.beginPath(); ctx.moveTo(-r*0.85,0); ctx.lineTo(r*0.85,0); ctx.stroke();
       }
