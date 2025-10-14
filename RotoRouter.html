@@ -279,14 +279,16 @@ function loadSetupFromStorage(){
   function countIncomplete(){ 
     let ai=0, human=0;
     for (const p of state.players){
-      if (!p) continue;
-      const finished = playerHasFinished(p);
-      const out = ((p.tokensRemoved|0) >= TOKENS_MAX) && (countTokens(p.id)===0);
-      if (finished || out) continue;
+      if (!p || p.active===false) continue;             // ← ignore inactive colors
+      const scoredAll = ((p.tokensRemoved|0) >= TOKENS_MAX);
+      const finished  = playerHasFinished(p) || scoredAll;  // ← also finished if all tokens scored/removed
+      const out       = scoredAll && (countTokens(p.id)===0);
+      if (finished || out) continue;                    // finished/out don’t count as “incomplete”
       if (p.ai) ai++; else human++;
     }
     return {ai, human};
   }
+
   function onlyOneAILeft(){ 
     const {ai, human} = countIncomplete(); 
     return ai===1 && human===0; 
@@ -1886,10 +1888,9 @@ function loadSetupFromStorage(){
 
   function playerHasFinished(P){
     if (!P) return false;
-    const reached = P.reached
-      ? (P.reached instanceof Set ? P.reached : new Set(P.reached))
-      : new Set();
-    return reached.size >= 3;
+    // Finished only when all tokens have been removed/scored.
+    // (tokensRemoved is 0..TOKENS_MAX; scoring removes a token.)
+    return (P.tokensRemoved|0) >= TOKENS_MAX;
   }
 
   // --- Places UI, driven ONLY by state.finishOrder (stable & persisted) ---
@@ -2770,11 +2771,14 @@ function loadSetupFromStorage(){
     state.current=(state.current+1)%state.players.length;
     startTurn();
     refreshSkipTags();
-    // Don't overwrite Fix prompts, GameOver, or any FORCED state after startTurn()
     const forcedNow =
       state.forcePlace ||
-      (state.forceElbowFor != null && state.forceElbowFor === state.current);
-    if (state.phase !== 'cornerFix' && state.phase !== 'deadFix' && state.phase !== 'gameOver' && !forcedNow) {
+      (state.forceElbowFor != null && state.forceElbowFor === state.current) ||
+      state.pausedForSoloAI;                   // ← NEW: don’t overwrite the solo-AI prompt
+    if (state.phase !== 'cornerFix' &&
+        state.phase !== 'deadFix'  &&
+        state.phase !== 'gameOver' &&
+        !forcedNow) {
       setStatus('Turn passed.');
     }
     state.turnAdvancing=false;

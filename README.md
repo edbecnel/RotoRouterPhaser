@@ -6,7 +6,16 @@ A tactical route-building board game with optional AI players.
 
 ---
 
-## What’s new (Oct 13, 2025)
+### What’s new (Oct 14, 2025)
+
+## Fixed bug related to AI
+
+- When playing 2 players (1 human and 1 AI) or 3 players (1 humand and 2 AI), the "Continue" game state was being incorrectly triggered
+  after the human player landed all his tokens. Fixed logic to determine when a player has truly finished.
+- Fixed bug whereby the solo-AI "Continue" warning message was getting overriden by "Turn passed." message endTurnImmediate(). Extended the guard
+  that suppresses the "Turn passed." message to also suppress it while we're paused for the solo-AI prompt.
+
+### Oct 13, 2025
 
 ## New: Token Visibility Toggle (Hide/Unhide)
 
