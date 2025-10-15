@@ -120,6 +120,7 @@
         </div>
         <div class="row small muted">Move along <b>any connected pipes</b> (opponent tracks allowed once networks connect). One token action/turn. Max 3 tokens/player.</div>
         <label class="toggle"><input type="checkbox" id="vizEdges"> Show connection edges</label>
+        <label class="toggle"><input type="checkbox" id="aiDebug"> AI debug trace (console)</label>        
         <hr style="border-color:#1f2636"/>
         <div class="row"><b>Rotation</b></div>
         <div class="row">
@@ -231,6 +232,9 @@ function loadSetupFromStorage(){
   };
   const aiSleepTime = 200;
   const aiSleepTime2 = 300;
+  const aiSleepTime3 = 280;
+  const previewRotationDuration = 500;
+  const rotationDuration = 500;
   const setStatus=(t)=>{ document.getElementById('status').innerHTML=t; };
   const tag = (id)=>document.getElementById(id);
   const turnTag=()=>tag('turnTag');
@@ -1201,6 +1205,7 @@ function loadSetupFromStorage(){
     template:()=>document.getElementById('template'),
     canvas:()=>document.getElementById('board'),
     vizEdges:()=>document.getElementById('vizEdges'),
+    aiDebug:()=>document.getElementById('aiDebug'),
   };
 
   const state={ N:9, cell:64, pad:20, board:makeBoard(9),
@@ -1223,6 +1228,8 @@ function loadSetupFromStorage(){
     turnRedo:   [],     // Per-turn redo stack
     pausedForSoloAI: false,
     soloAIResumed: false, // once user clicks Continue, don’t pause again
+    aiDebug: false,
+    lastPlaced: PLAYERS.map(()=>null),    
     forceElbowFor: null,  // If set to a player id, that player must place an Elbow this turn (but only if placement is possible)
     _enforceForcePlaceWindow: false  // gate: only true during startTurn() check
   };
@@ -1466,6 +1473,7 @@ function loadSetupFromStorage(){
       cornerSealed: Array.isArray(state.cornerSealed) ? [...state.cornerSealed] : null,
       deadFixDoneThisTurn: !!state.deadFixDoneThisTurn,   // ← top-level, not per-player
       finishOrder: Array.isArray(state.finishOrder) ? state.finishOrder.slice() : [],
+      lastPlaced: Array.isArray(state.lastPlaced) ? state.lastPlaced.map(lp => lp ? {x:lp.x|0, y:lp.y|0, pid:lp.pid|0, t:lp.t||0} : null) : null,
       // We intentionally DO NOT persist: phase, subphase, highlights, die, animations, hover, etc.
     };
   }
@@ -1593,6 +1601,13 @@ function loadSetupFromStorage(){
     state.aiVisitedThisTurn = new Set();
     state.aiLastHop = new Map();
     state.aiLastEdge = new Map();
+
+    // Restore last-placed per player (optional field)
+    if (Array.isArray(snap.lastPlaced)) {
+      state.lastPlaced = snap.lastPlaced.map(lp => lp ? { x: lp.x|0, y: lp.y|0, pid: lp.pid|0, t: lp.t||0 } : null);
+    } else {
+      state.lastPlaced = state.players.map(()=>null);
+    }    
 
     // --- Robust legacy backfill for token counts ---
     // Newer code treats:
@@ -2137,6 +2152,7 @@ function loadSetupFromStorage(){
             ? { x: pick.x, y: pick.y, rot: pick.rot }
             : (fb ? { x: fb.at.x, y: fb.at.y, rot: fb.rot } : null);
           if (chosen) {
+            if (state.aiDebug) console.log('[AI] place chosen', chosen);
             placeMode(); // compute highlights
             state.phase = 'place';
             state.subphase = 'rotateNew';
@@ -2144,6 +2160,8 @@ function loadSetupFromStorage(){
             state.previewRot  = chosen.rot|0;
             render();
             await sleep(aiSleepTime);
+            aiFlashPick(chosen.x, chosen.y, P.color);
+            await sleep(aiSleepTime3);
             placeMode(); // commit placement
             // Clear elbow force after successful placement
             P.elbowSkipCount = 0;
@@ -2207,7 +2225,8 @@ function loadSetupFromStorage(){
                 : (placeOK ? (bestRotPick.score >= bestPlace.score + 8) : true)   // stricter in the opening
               );
 
-            if (rotOK){            
+            if (rotOK){
+              if (state.aiDebug) console.log('[AI] rotate-existing chosen', bestRotPick);
               state.forcePlace = false; // ensure we’re not in forced placement mode
               // Perform rotation with animation
               placeMode();
@@ -2216,11 +2235,14 @@ function loadSetupFromStorage(){
               state.previewRot  = state.rotateFocus.original;
               render();
               await sleep(aiSleepTime);
-              await animatePreviewRotation(bestRotPick.rot, 500);
+              aiFlashPick(bestRotPick.x, bestRotPick.y, P.color);
+              await sleep(aiSleepTime3);
+              await animatePreviewRotation(bestRotPick.rot, previewRotationDuration);
               // Confirm rotation directly instead of re-entering placement mode
               applyRotation();
               await sleep(aiSleepTime);
             } else if (placeOK){
+              if (state.aiDebug) console.log('[AI] place (RS/RE/RT) chosen', bestPlace);
               // Perform placement with chosen rotation
               placeMode(); // compute highlights
               state.phase='place'; state.subphase='rotateNew';
@@ -2228,10 +2250,11 @@ function loadSetupFromStorage(){
               state.previewRot  = 0;
               render();
               await sleep(aiSleepTime);
-              await animatePreviewRotation(bestPlace.rot, 500);
+              await animatePreviewRotation(bestPlace.rot, previewRotationDuration);
               placeMode(); // confirm placement
               await sleep(aiSleepTime);
             } else {
+              if (state.aiDebug) console.log('[AI] bottom card (no legal placement)');
               bottomCard();
             }
           } else {
@@ -2244,7 +2267,7 @@ function loadSetupFromStorage(){
               state.rotateFocus = { x: bestPlace.x, y: bestPlace.y, original: 0 };
               state.previewRot  = 0;
               render();
-              await animatePreviewRotation(bestPlace.rot, 500);
+              await animatePreviewRotation(bestPlace.rot, previewRotationDuration);
               // Safety: refuse to commit if the chosen rotation is not fully reciprocal now.
               {
                 const baseType = baseDrawnType(P.drawn);
@@ -2273,9 +2296,11 @@ function loadSetupFromStorage(){
       if (!P.tokenUsed){
         const action = aiChooseTokenAction(P.id);
         if (action){
+          if (state.aiDebug) console.log('[AI] token action', action);
           // Enter token mode and perform the action
           tokenMode(); // highlights tokens/corner
-          await sleep(aiSleepTime);
+          aiFlashPick(action.type==='place' ? action.at.x : action.to.x, action.type==='place' ? action.at.y : action.to.y, P.color);
+          await sleep(aiSleepTime3);
           if (action.type === 'place'){
             // Click corner
             const c = action.at;
@@ -2615,7 +2640,8 @@ function loadSetupFromStorage(){
     state.forcePlace = false;
     state.forceElbowFor = null;
     state.players.forEach(p => { p.skipCount = 0; p.elbowSkipCount = 0; });
-
+    // Per-player last-placed tile (for turn highlight)
+    state.lastPlaced = state.players.map(()=>null);    
 
     // Now start the turn; this will push the baseline snapshot
     startTurn();
@@ -3569,6 +3595,9 @@ function checkForceElbow(P){
       pushHistory('Place/Replace');
 
       // Preserve owner color if RC is replacing an existing track
+      // Track last placed for subtle turn highlight
+      state.lastPlaced[P.id] = { x, y, pid: P.id, t: performance.now() };
+
       const prevHadTrack = !!cell.track;
       const prevOwner    = cell.owner;
 
@@ -3760,7 +3789,7 @@ function checkForceElbow(P){
     return d;
   }
 
-  function startRotateAnim(x,y, fromDeg, toDeg, dur=500){
+  function startRotateAnim(x,y, fromDeg, toDeg, dur=rotationDuration){
     state.rotAnims.push({ x, y, from:fromDeg, to:toDeg, t0: performance.now(), dur });
     ensureAnimLoop();
   }
@@ -4037,6 +4066,9 @@ function checkForceElbow(P){
         cell.track = placedType;
         cell.rot   = snap90(state.previewRot || 0);
         cell.owner = P.id;
+        // Record last placed for active player's glow
+        state.lastPlaced = Array.isArray(state.lastPlaced) ? state.lastPlaced : [];
+        state.lastPlaced[P.id] = { x, y, rot: cell.rot|0, track: cell.track };        
 
         P.deck.discard.push(P.drawn);
         P.drawn = null;
@@ -4106,6 +4138,9 @@ function checkForceElbow(P){
         cell.track = 'Cross';
         cell.rot   = 0;                     // Cross is symmetric
         cell.owner = (prevOwner != null ? prevOwner : P.id);
+        // Record last placed for active player's glow
+        state.lastPlaced = Array.isArray(state.lastPlaced) ? state.lastPlaced : [];
+        state.lastPlaced[P.id] = { x, y, rot: cell.rot|0, track: cell.track };        
 
         // discard card, clear force/skip counters, and commit
         P.deck.discard.push(P.drawn);
@@ -4315,7 +4350,18 @@ function checkForceElbow(P){
   });
   btn('rollBtn').addEventListener('click', rollDie);
   btn('applyBtn').addEventListener('click', applyRotation);
-  UI.vizEdges().addEventListener('change', render);
+
+  if (UI.aiDebug()){
+    try {
+      const saved = localStorage.getItem('rr.aiDebug');
+      if (saved!=null) { UI.aiDebug().checked = (saved === '1'); }
+    } catch {}
+    state.aiDebug = !!(UI.aiDebug() && UI.aiDebug().checked);
+    UI.aiDebug().addEventListener('change', ()=>{
+      state.aiDebug = !!UI.aiDebug().checked;
+      try { localStorage.setItem('rr.aiDebug', state.aiDebug ? '1':'0'); } catch {}
+    });
+  }
 
   btn('saveBtn').addEventListener('click', saveGame);
   btn('loadBtn').addEventListener('click', () => document.getElementById('loadFile').click());
@@ -4939,6 +4985,7 @@ function checkForceElbow(P){
       ctx.strokeStyle = '#ffcc00';
       ctx.strokeRect(rf.x*cell+2, rf.y*cell+2, cell-4, cell-4);
       ctx.restore();
+      // (last-placed glow is drawn at the end of render so it sits above everything)
     }    
     // ghost
     const P=currentPlayer();
@@ -4996,7 +5043,36 @@ function checkForceElbow(P){
         state.gearSpinAnim = null;
       }
     }
+    // last-placed track glow
+    drawLastPlacedHighlight();    
     // Outer restore for the whole frame   
+    ctx.restore();
+  }
+
+  function drawLastPlacedHighlight(){
+    const P = currentPlayer();
+    if (!P || !P.active) return;
+    const lp = Array.isArray(state.lastPlaced) ? state.lastPlaced[P.id] : null;
+    if (!lp) return;
+    const cellData = state.board[lp.y] && state.board[lp.y][lp.x];
+    if (!cellData || !cellData.track) return;
+    const cell = state.cell;
+    const x = lp.x, y = lp.y;
+    const t = performance.now();
+    const pulse = 0.35 + 0.25*(0.5 + 0.5*Math.sin(t/360));
+    const x0 = x*cell + 3, y0 = y*cell + 3, w = cell - 6, h = cell - 6;
+    ctx.save();
+    // Soft animated glow
+    ctx.strokeStyle = P.color;
+    ctx.lineWidth = 5;
+    ctx.globalAlpha = 0.9;
+    ctx.shadowColor = P.color;
+    ctx.shadowBlur = 12 + 10*pulse;
+    ctx.strokeRect(x0, y0, w, h);
+    // very light inner wash
+    ctx.globalAlpha = 0.12 + 0.10*pulse;
+    ctx.fillStyle = P.color;
+    ctx.fillRect(x0+1, y0+1, w-2, h-2);
     ctx.restore();
   }
 
@@ -5082,6 +5158,23 @@ function checkForceElbow(P){
       }
     }
     ctx.restore();
+  }
+
+  // Brief rectangular flash used to preview an AI's chosen cell before commit
+  function aiFlashPick(x,y, color){
+    const cell=state.cell, pad=state.pad;
+    const x0 = pad + x*cell + 3, y0 = pad + y*cell + 3, w = cell - 6, h = cell - 6;
+    const start = performance.now(), D = 320;
+    (function step(t){
+      const k = Math.min(1, (t - start) / D);
+      ctx.save();
+      ctx.globalAlpha = 1 - k;
+      ctx.lineWidth = 3;
+      ctx.strokeStyle = color || '#fff';
+      ctx.strokeRect(x0, y0, w, h);
+      ctx.restore();
+      if (k < 1) requestAnimationFrame(step);
+    })(start);
   }
 
   // Draw a background gear from the external SVG.

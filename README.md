@@ -6,7 +6,24 @@ A tactical route-building board game with optional AI players.
 
 ---
 
-### What’s new (Oct 14, 2025)
+### What’s new
+
+### Oct 15, 2025
+
+- **Last-placed highlight** – on your turn, the most recent track you placed is outlined with a soft glow so you can quickly find it again.
+- **AI move preview** – before the AI commits a placement/rotation, it briefly flashes a ring on the chosen cell (a quick “heads-up” beat).
+- **AI debug trace (console)** – new sidebar toggle (“AI debug trace (console)”) prints the AI’s short decision trace (targets considered, scores, and final choice).
+
+## Using the new features
+
+- **Seeing your last placement**
+  - After you place a track, a subtle glow/border marks that cell **only on your turn**. It fades when you change context or another track becomes the “last placed”.
+- **Watching AI intentions**
+  - When the current player is AI, you’ll see a short flash on the cell it’s about to use (whether rotating an existing tile or placing a new one). Then it commits.
+- **Debugging AI**
+  - In the sidebar, under _Actions → Token_, tick **AI debug trace (console)**. Open the browser console to view: scores for candidate moves, chosen action, and any fallbacks.
+
+### Oct 14, 2025
 
 ## Fixed bug related to AI
 

@@ -69,6 +69,11 @@ _Tip:_ while a placement “ghost” is shown, use **Q/E** to rotate before conf
    - **Move** one of your tokens along connected tracks to any reachable empty cell.
 4. **End Turn**.
 
+### Visual Aids
+
+- **Last-placed highlight:** on your turn, your most recent placement is outlined with a subtle cyan glow.
+- **AI move preview:** on AI turns, the chosen placement/rotation cell flashes briefly before the commit.
+
 ## Forced Play Rules
 
 - **3 Skipped Tracks**: If you skip 3 track cards in a row, on your **next turn** you must **Draw and Place** the card drawn (if legal). Bottom and End Turn are disabled until you place it.
@@ -191,6 +196,8 @@ If your own home corner is sealed by perpendicular Straights:
 - **Legality:** same adjacency rules as humans; won’t place tiles that only touch opponents without connecting.
 - **Card economy:** prefers to save RS/RE/RT/RC for endgame; Bottoms weak cards only when not forced.
 - **Save/Load:** AI memory and counters persist in snapshots.
+- **Move preview:** brief flash on the AI’s chosen cell.
+- **AI debug trace:** toggle **AI debug trace (console)** in the sidebar to print a short decision log to the browser console.
 
 ---
 

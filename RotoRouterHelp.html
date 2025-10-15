@@ -108,6 +108,11 @@
       <li><b>Token Action</b> (optional): place a new token on your home corner (if there is a track on the home corner) <i>or</i> move one token along connected tracks to any reachable empty cell.</li>
       <li><b>End Turn</b>.</li>
     </ol>
+    <h3>Visual Aids</h3>
+    <ul>
+      <li><b>Last-placed highlight:</b> on <i>your turn</i>, the most recent track you placed is outlined with a subtle glow in your color so it’s easy to find again.</li>
+      <li><b>AI move preview:</b> when it’s an AI’s turn, the chosen placement/rotation cell flashes briefly before the move is committed.</li>
+    </ul>
     <p class="tip"><i>Forced play:</i> If a forced card has <b>no legal placement</b>, the force is <b>waived</b>; you may Bottom it.</p>
     <h2>AI Players</h2>
     <ul>
@@ -117,6 +122,9 @@
       <li><b>Legality:</b> follows the same adjacency rules as players; won’t place tiles that only touch opponent tracks without connecting.</li>
       <li><b>Card economy:</b> prefers saving RS/RE/RT/RC for endgame; Bottoms low-value cards only when not forced.</li>
       <li><b>Save/Load safe:</b> AI flags and counters persist in saved games.</li>
+      <li><b>Move preview:</b> a quick flash marks the AI’s chosen cell just before it acts.</li>
+      <li><b>Debug trace (console):</b> enable <i>AI debug trace (console)</i> in the sidebar to print a short decision log to the browser console.</li>
+     </ul>      
     </ul>
     <h2>Solo-AI Pause</h2>
     <p>When only <b>one AI player</b> remains and all human players are finished, play <b>pauses</b> and a banner appears:</p>
