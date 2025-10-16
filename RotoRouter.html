@@ -120,7 +120,16 @@
         </div>
         <div class="row small muted">Move along <b>any connected pipes</b> (opponent tracks allowed once networks connect). One token action/turn. Max 3 tokens/player.</div>
         <label class="toggle"><input type="checkbox" id="vizEdges"> Show connection edges</label>
-        <label class="toggle"><input type="checkbox" id="aiDebug"> AI debug trace (console)</label>        
+        <label class="toggle"><input type="checkbox" id="aiDebug"> AI debug trace (console)</label>
+        <!-- AI delay scale: 1..10 => 0.5x .. 5.0x. Applies to AI pauses only. -->
+        <label class="small" style="display:block; margin-top:6px;">
+          <div style="display:flex; justify-content:space-between; align-items:center; gap:8px;">
+            <span>AI delay</span>
+            <span id="aiDelayLabel" class="muted small">(×1.0)</span>
+          </div>
+          <input id="aiDelay" type="range" min="1" max="10" step="1" value="2" style="width:100%;">
+          <div class="small muted">1 = shorter (faster), 10 = longer (slower)</div>
+        </label>        
         <hr style="border-color:#1f2636"/>
         <div class="row"><b>Rotation</b></div>
         <div class="row">
@@ -237,6 +246,9 @@ function loadSetupFromStorage(){
   const rotationDuration = 500;
   const setStatus=(t)=>{ document.getElementById('status').innerHTML=t; };
   const tag = (id)=>document.getElementById(id);
+  // AI delay scale mapping: index 1..10 -> 0.5x .. 5.0x
+  const AI_DELAY_MULTS = [0.5,1.0,1.5,2.0,2.5,3.0,3.5,4.0,4.5,5.0];
+  function clamp(n,min,max){ return n<min?min:n>max?max:n; }  
   const turnTag=()=>tag('turnTag');
   const phaseTag=()=>tag('phaseTag');
   const drawnTag=()=>tag('drawnCard');
@@ -853,7 +865,18 @@ function loadSetupFromStorage(){
   }
 
   // Simple sleep
-  function sleep(ms){ return new Promise(r => setTimeout(r, ms)); }
+  function sleep(ms){
+    // Apply AI delay multiplier ONLY while the AI is actively executing its turn
+    // (so human interactions remain snappy).
+    try{
+      const cur = (typeof currentPlayer === 'function') ? currentPlayer() : null;
+      const aiActive = !!(state && (state.aiBusy || (cur && cur.ai)));
+      const mul = aiActive ? (state.aiDelayScale || 1) : 1;
+      return new Promise(r => setTimeout(r, Math.max(0, Math.round(ms * mul))));
+    } catch(_){
+      return new Promise(r => setTimeout(r, ms));
+    }
+  }
 
   // Animate preview rotation toward target (0/90/180/270) in small steps
   async function animatePreviewRotation(targetDeg, durationMs=420){
@@ -1240,6 +1263,29 @@ function loadSetupFromStorage(){
   state.aiLastEdge = new Map(); // key: pid, val: "ax,ay|bx,by"
 
   const canvas=UI.canvas(); const ctx=canvas.getContext('2d');
+
+  // === AI delay scale state & UI wiring ===
+  // Persisted index 1..10 (default 2 => ×1.0). Multiplier looked up from AI_DELAY_MULTS.
+  (function initAIDelay(){
+    let saved = parseInt(localStorage.getItem('rr.aiDelayIndex')||'2',10);
+    if (!Number.isFinite(saved)) saved = 2;
+    state.aiDelayIndex = clamp(saved, 1, 10);
+    state.aiDelayScale = AI_DELAY_MULTS[state.aiDelayIndex-1]; // 0.5..5.0
+    const range = document.getElementById('aiDelay');
+    const label = document.getElementById('aiDelayLabel');
+    const refreshLabel = ()=>{ if(label) label.textContent = `(×${state.aiDelayScale.toFixed(1)})`; };
+    if (range){
+      range.value = String(state.aiDelayIndex);
+      range.addEventListener('input', (e)=>{
+        const idx = clamp(parseInt(e.target.value||'2',10),1,10);
+        state.aiDelayIndex = idx;
+        state.aiDelayScale = AI_DELAY_MULTS[idx-1];
+        try{ localStorage.setItem('rr.aiDelayIndex', String(idx)); }catch(_){}
+        refreshLabel();
+      });
+    }
+    refreshLabel();
+  })();
 
   // ==== UNDO / REDO HELPERS ====
   function pushHistory(label){

@@ -8,6 +8,20 @@ A tactical route-building board game with optional AI players.
 
 ### What’s new
 
+### What’s new (Oct 16, 2025)
+
+## New: AI Delay Control (1–10 → ×0.5…×5.0)
+
+You can now scale the AI's think-time/delay using a simple slider in the sidebar.
+
+- Where: In the Actions → Token panel, under the “AI debug trace (console)” checkbox.
+- Control: AI delay slider from 1 to 10 with a live label showing the multiplier (e.g. ×1.0).
+- Range: 1 → ×0.5 (shorter delays, faster AI), … 10 → ×5.0 (longer delays, slower AI).
+- Default: 2 (×1.0). This matches the previous timing: aiSleepTime=200, aiSleepTime2=300, aiSleepTime3=280.
+- Persistence: The setting is saved per-browser and restored on next load.
+- Design note: The control adjusts delay length (not speed); larger values mean longer waits.
+- Design note: The UI includes the caption: 1 = shorter (faster), 10 = longer (slower) and a numeric “×multiplier” label.
+
 ### Oct 15, 2025
 
 - **Last-placed highlight** – on your turn, the most recent track you placed is outlined with a soft glow so you can quickly find it again.
