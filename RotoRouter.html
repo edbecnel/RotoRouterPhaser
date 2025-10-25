@@ -6,7 +6,7 @@
   <title>RotoRouter</title>
   <style>
     html, body { height: 100%; margin: 0; font-family: system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif; background: #0f1115; color: #e6e6e6; }
-    .app { display: grid; grid-template-columns: 360px 1fr; height: 100%; }
+    .app { display: grid; grid-template-columns: 425px 1fr; height: 100%; }
     .sidebar { padding: 14px 16px; border-right: 1px solid #222835; background: #121723; overflow: auto; }
     .sidebar h1 { font-size: 18px; margin: 0 0 8px; }
     .sidebar h2 { font-size: 14px; margin: 16px 0 8px; color: #b7c1ff; }
@@ -239,15 +239,28 @@ function loadSetupFromStorage(){
     if(_toastTimer) clearTimeout(_toastTimer);
     _toastTimer=setTimeout(()=>el.classList.remove('show'), ms);
   };
+  // AI timing (base ms). sleep(...) scales by state.aiDelayScale (UI dropdown/slider).
   const aiSleepTime = 200;
   const aiSleepTime2 = 300;
   const aiSleepTime3 = 280;
-  const previewRotationDuration = 500;
-  const rotationDuration = 500;
   const setStatus=(t)=>{ document.getElementById('status').innerHTML=t; };
   const tag = (id)=>document.getElementById(id);
   // AI delay scale mapping: index 1..10 -> 0.5x .. 5.0x
   const AI_DELAY_MULTS = [0.5,1.0,1.5,2.0,2.5,3.0,3.5,4.0,4.5,5.0];
+  // === CONSTS (drawing + thresholds; mechanical only, no logic change) ===
+  const CONSTS = Object.freeze({
+    DEFAULT_CELL: 64,
+    DEFAULT_PAD:  20,
+
+    // Canvas strokes
+    GRID_LINE_WIDTH:        1, // outer grid box
+    GRID_HEAVY_LINE_WIDTH:  2, // minor grid lines / rings
+    HILITE_LINE_WIDTH:      3, // selection/placement highlights
+
+    // Turn/skip thresholds
+    SKIP_LIMIT:         3, // general skip counter cap
+    ELBOW_SKIP_LIMIT:   3, // elbow-only skip counter cap
+  });
   function clamp(n,min,max){ return n<min?min:n>max?max:n; }  
   const turnTag=()=>tag('turnTag');
   const phaseTag=()=>tag('phaseTag');
@@ -433,24 +446,34 @@ function loadSetupFromStorage(){
     const s = document.getElementById('skippedTag');
     const e = document.getElementById('elbowSkippedTag');
     if (s) {
-      s.textContent = `Skipped: ${P.skipCount|0}/3`;
+      s.textContent = `Skipped: ${P.skipCount|0}/${CONSTS.SKIP_LIMIT}`;
       // Optional: show red only when general skip force is active next turn
       if ((P.skipCount|0) >= 3) s.classList.add('warn'); else s.classList.remove('warn');
     }
     if (e) {
-      e.textContent = `Elbows Skipped: ${P.elbowSkipCount|0}/3`;
+      e.textContent = `Elbows Skipped: ${P.elbowSkipCount|0}/${CONSTS.ELBOW_SKIP_LIMIT}`;
       // Red only while at/over the elbow force threshold
-      if ((P.elbowSkipCount|0) >= 3) e.classList.add('warn'); else e.classList.remove('warn');
+      if ((P.elbowSkipCount|0) >= CONSTS.ELBOW_SKIP_LIMIT) e.classList.add('warn'); else e.classList.remove('warn');
     }
   }
 
   // Colors & constants
-  const COLORS={ bg:'#0b0f18', grid:'#263145', gear:'#202a3d', track:'#6d7aa6', block:'#434b63', slot:'#a8b7ff', hilite:'#9efff4', tokenR:'#ff6b6b', tokenG:'#6bff95', tokenB:'#6bd9ff', tokenY:'#ffef6b', edge:'#f4b86a', hint:'#c7f0ff' };
-  const TrackCard={
+  const COLORS = Object.freeze({ bg:'#0b0f18', grid:'#263145', gear:'#202a3d', track:'#6d7aa6', block:'#434b63', slot:'#a8b7ff', hilite:'#9efff4', tokenR:'#ff6b6b', tokenG:'#6bff95', tokenB:'#6bd9ff', tokenY:'#ffef6b', edge:'#f4b86a', hint:'#c7f0ff' });
+  const TrackCard = Object.freeze({
     Straight:'Straight', Elbow:'Elbow', Cross:'Cross', T:'T',
     RStraight:'RS', RElbow:'RE', RCross:'RC', RT:'RT'
-  };
+  });
   const DIE_FACES=['X','X','X','CW90','CW90','CCW90','CCW90','DEG180'];
+  const Phase = Object.freeze({
+    idle:'idle', place:'place', token:'token',
+    cornerFix:'cornerFix', deadFix:'deadFix', gameOver:'gameOver'
+  });
+  const Subphase = Object.freeze({
+    select:'select', target:'target',
+    rotateExisting:'rotateExisting', rotateNew:'rotateNew',
+    pickDeadStraight:'pickDeadStraight'
+  });
+
   // === Animation timing knobs ===
   const RR_APPLY_TWEEN_MS = 650;    // duration for the big "Apply" rotation tween (tiles + gears)
   const PREVIEW_ROT_TWEEN_MS = 400; // duration for RR keys initiated track placement ghost preview rotation
@@ -519,7 +542,14 @@ function loadSetupFromStorage(){
   }
   
   // Utilities & state
-  function shuffle(a){ for(let i=a.length-1;i>0;i--){ const j=Math.floor(Math.random()*(i+1)); [a[i],a[j]]=[a[j],a[i]]; } return a; }
+  function shuffle(a){
+    // displayDeck("Before: ", a);
+    for(let i=a.length-1;i>0;i--) { 
+      const j=Math.floor(Math.random()*(i+1)); [a[i],a[j]]=[a[j],a[i]]; 
+    }
+    // displayDeck("After: ", a);
+    return a; 
+  }
   
   // ======== AI: lightweight heuristics (v0) ========
 
@@ -533,7 +563,7 @@ function loadSetupFromStorage(){
     if (!P || !P.drawn) return [];
     const prev = { phase: state.phase, subphase: state.subphase, highlight: state.highlight.slice() };
     try {
-      state.phase='place'; state.subphase=null; state.highlight=[];
+      state.phase=Phase.place; state.subphase=null; state.highlight=[];
       computePlaceHighlights();                   // populates state.highlight for P.drawn
       return (state.highlight || []).slice();
     } finally {
@@ -879,7 +909,7 @@ function loadSetupFromStorage(){
   }
 
   // Animate preview rotation toward target (0/90/180/270) in small steps
-  async function animatePreviewRotation(targetDeg, durationMs=420){
+  async function animatePreviewRotation(targetDeg, durationMs=PREVIEW_ROT_TWEEN_MS){
     const norm = (n)=>((n%360)+360)%360;
     const stepCount = 6;
     const start = norm(state.previewRot|0);
@@ -1151,6 +1181,15 @@ function loadSetupFromStorage(){
     return null; // no-op (no sensible exploration found)
   }
 
+  function displayDeck(label, deck) {
+    console.info(label);
+    console.info("Len = " + deck.length);
+    // for(let i=a.length-1;i>0;i--){ const j=Math.floor(Math.random()*(i+1)); [a[i],a[j]]=[a[j],a[i]]; }
+    for(let i=0; i<deck.length; i++) {
+      console.info(deck[i]);
+    }
+  }
+
   function makeDeck(size, activeCount=4){
     // Baseline deck per player tuned for a 4-player table (your current numbers)
     const baseBySize = {
@@ -1196,12 +1235,7 @@ function loadSetupFromStorage(){
     // console.log("cfg.T = " + cfg.T);
     // console.log("cfg.Cross = " + cfg.Cross);
 
-    // Construct the deck
-    const TrackCard = {
-      Straight:'Straight', Elbow:'Elbow', Cross:'Cross', T:'T',
-      RStraight:'RS', RElbow:'RE', RCross:'RC', RT:'RT'
-    };
-
+    // Construct the deck (use global TrackCard enum)
     return {
       draw: shuffle([
         ...Array(cfg.Straight).fill(TrackCard.Straight),
@@ -1231,12 +1265,12 @@ function loadSetupFromStorage(){
     aiDebug:()=>document.getElementById('aiDebug'),
   };
 
-  const state={ N:9, cell:64, pad:20, board:makeBoard(9),
+  const state={ N:9, cell: CONSTS.DEFAULT_CELL, pad: CONSTS.DEFAULT_PAD, board:makeBoard(9),
     // AI turn coordination
     aiBusy:false,           // prevents re-entrancy (double actions)
     aiTimer:null,           // pending setTimeout handle for AI turn    
     players:PLAYERS.map(p=>({...p, deck:makeDeck(), drawn:null, tokens:0, tokensRemoved:0, drawLocked:false, drawUsed:false, tokenUsed:false, rollUsed:false, skipCount: 0, elbowSkipCount: 0, forceElbow: false, active:true })),    cornerLockTurns: PLAYERS.map(()=>0),
-    current:0, phase:'idle', subphase:null, highlight:[], hover:null, forcePlace:false, previewRot:0, die:null, tokenSelect:null,
+    current:0, phase:Phase.idle, subphase:null, highlight:[], hover:null, forcePlace:false, previewRot:0, die:null, tokenSelect:null,
     turnAdvancing:false,
     deadFixDoneThisTurn: false,
     rotAnims: [],  // active rotation tweens (on placed tiles)
@@ -1711,7 +1745,7 @@ function loadSetupFromStorage(){
       : PLAYERS.map(()=>false);
 
     // Reset transients/animations/UI-phase safely
-    state.phase = 'idle';
+    state.phase = Phase.idle;
     state.subphase = null;
     state.highlight = [];
     state.hover = null;
@@ -1764,7 +1798,7 @@ function loadSetupFromStorage(){
       maybeEnterFixPhasesAfterHistory(opts.op);
 
       // If we are not in a fix subphase, show the provided status (e.g., “Redid (Global)”).
-      if (state.phase !== 'cornerFix' && state.phase !== 'deadFix' && opts.status) {
+      if (state.phase !== Phase.cornerFix && state.phase !== Phase.deadFix && opts.status) {
         setStatus(opts.status);
       }
       render();
@@ -1888,7 +1922,7 @@ function loadSetupFromStorage(){
     // --- replace the entire maybeResumeDeadFixAfterHistory() with this unified helper ---
   function maybeEnterFixPhasesAfterHistory(op){
     if (state.turnAdvancing) return;
-    if (state.phase !== 'idle') return;
+    if (state.phase !== Phase.idle) return;
 
     const P = currentPlayer();
 
@@ -1902,8 +1936,8 @@ function loadSetupFromStorage(){
     if (!state.deadFixDoneThisTurn && typeof findAllTrappedStraights === 'function') {
       const trapped = findAllTrappedStraights();
       if (trapped && trapped.length){
-        state.phase    = 'deadFix';
-        state.subphase = 'pickDeadStraight';
+        state.phase    = Phase.deadFix;
+        state.subphase = Subphase.pickDeadStraight;
         state.highlight = trapped;
         const msg = 'Dead-Straight Fix: replace ONE highlighted Straight with a Cross (free).';
         setStatus(msg);
@@ -2126,8 +2160,8 @@ function loadSetupFromStorage(){
             // Use the same commit path used elsewhere:
             // placeMode() → set rotateNew focus/rot → placeMode() again to commit.
             placeMode(); // compute highlights
-            state.phase = 'place';
-            state.subphase = 'rotateNew';
+            state.phase = Phase.place;
+            state.subphase = Subphase.rotateNew;
             state.rotateFocus = { x: pick.x, y: pick.y, original: 0 };
             state.previewRot  = pick.rot|0;
             render();
@@ -2200,8 +2234,8 @@ function loadSetupFromStorage(){
           if (chosen) {
             if (state.aiDebug) console.log('[AI] place chosen', chosen);
             placeMode(); // compute highlights
-            state.phase = 'place';
-            state.subphase = 'rotateNew';
+            state.phase = Phase.place;
+            state.subphase = Subphase.rotateNew;
             state.rotateFocus = { x: chosen.x, y: chosen.y, original: 0 };
             state.previewRot  = chosen.rot|0;
             render();
@@ -2276,14 +2310,14 @@ function loadSetupFromStorage(){
               state.forcePlace = false; // ensure we’re not in forced placement mode
               // Perform rotation with animation
               placeMode();
-              state.phase='place'; state.subphase='rotateExisting';
+              state.phase=Phase.place; state.subphase=Subphase.rotateExisting;
               state.rotateFocus = { x: bestRotPick.x, y: bestRotPick.y, original: state.board[bestRotPick.y][bestRotPick.x].rot };
               state.previewRot  = state.rotateFocus.original;
               render();
               await sleep(aiSleepTime);
               aiFlashPick(bestRotPick.x, bestRotPick.y, P.color);
               await sleep(aiSleepTime3);
-              await animatePreviewRotation(bestRotPick.rot, previewRotationDuration);
+              await animatePreviewRotation(bestRotPick.rot);
               // Confirm rotation directly instead of re-entering placement mode
               applyRotation();
               await sleep(aiSleepTime);
@@ -2291,12 +2325,12 @@ function loadSetupFromStorage(){
               if (state.aiDebug) console.log('[AI] place (RS/RE/RT) chosen', bestPlace);
               // Perform placement with chosen rotation
               placeMode(); // compute highlights
-              state.phase='place'; state.subphase='rotateNew';
+              state.phase=Phase.place; state.subphase=Subphase.rotateNew;
               state.rotateFocus = { x: bestPlace.x, y: bestPlace.y, original: 0 };
               state.previewRot  = 0;
               render();
               await sleep(aiSleepTime);
-              await animatePreviewRotation(bestPlace.rot, previewRotationDuration);
+              await animatePreviewRotation(bestPlace.rot);
               placeMode(); // confirm placement
               await sleep(aiSleepTime);
             } else {
@@ -2309,11 +2343,11 @@ function loadSetupFromStorage(){
             const bestPlace = aiBestPlacementForDrawn(P.id, targets);
             if (bestPlace) {
               placeMode(); // compute highlights
-              state.phase='place'; state.subphase='rotateNew';
+              state.phase=Phase.place; state.subphase=Subphase.rotateNew;
               state.rotateFocus = { x: bestPlace.x, y: bestPlace.y, original: 0 };
               state.previewRot  = 0;
               render();
-              await animatePreviewRotation(bestPlace.rot, previewRotationDuration);
+              await animatePreviewRotation(bestPlace.rot);
               // Safety: refuse to commit if the chosen rotation is not fully reciprocal now.
               {
                 const baseType = baseDrawnType(P.drawn);
@@ -2352,7 +2386,7 @@ function loadSetupFromStorage(){
             const c = action.at;
             // Reuse the handler path (simulate click)
             const wasPhase = state.phase; // token
-            state.subphase='select';
+            state.subphase=Subphase.select;
             const rect = { x:c.x, y:c.y };
             // Directly perform place by emulating the click branch
             const cCell = state.board[c.y][c.x];
@@ -2363,14 +2397,14 @@ function loadSetupFromStorage(){
               P.tokenUsed = true;
               tokenTag().textContent='Token: Used';
               btn('tokenBtn').disabled = true;
-              state.phase='idle'; state.subphase=null; state.highlight=[]; state.tokenSelect=null;
+              state.phase=Phase.idle; state.subphase=null; state.highlight=[]; state.tokenSelect=null;
               setStatus('AI placed a new token.');
               render(); updateHUD();
             }
           } else if (action.type === 'move'){
             // Select token, then choose destination
             tokenMode();
-            state.subphase='select';
+            state.subphase=Subphase.select;
             state.tokenSelect = {x: action.from.x, y: action.from.y};
             const moves = reachableFrom(action.from, P.id);
             state.highlight = moves;
@@ -2396,7 +2430,7 @@ function loadSetupFromStorage(){
             P.tokenUsed = true;
             tokenTag().textContent='Token: Used';
             btn('tokenBtn').disabled = true;
-            state.phase='idle'; state.subphase=null; state.highlight=[]; state.tokenSelect=null;
+            state.phase=Phase.idle; state.subphase=null; state.highlight=[]; state.tokenSelect=null;
 
             // remember landing to prevent bounce loops across turns
             if (!state.aiVisitedThisTurn) state.aiVisitedThisTurn = new Set();
@@ -2448,7 +2482,7 @@ function loadSetupFromStorage(){
                 currentPlayer().tokenUsed = true;
               }
               // clean up token subphase HUD
-              state.phase='idle'; state.subphase=null; state.highlight=[]; state.tokenSelect=null;
+              state.phase=Phase.idle; state.subphase=null; state.highlight=[]; state.tokenSelect=null;
               if (!state.aiLastHop) state.aiLastHop = new Map();
               state.aiLastHop.set(currentPlayer().id, `${again.to.x},${again.to.y}`);
 
@@ -2503,7 +2537,7 @@ function loadSetupFromStorage(){
                   if (!state.aiLastHop) state.aiLastHop = new Map();
                   state.aiLastHop.set(currentPlayer().id, `${again.to.x},${again.to.y}`);
                 }
-                state.phase='idle'; state.subphase=null; render(); updateHUD();
+                state.phase=Phase.idle; state.subphase=null; render(); updateHUD();
               }
             }
           }
@@ -2550,7 +2584,7 @@ function loadSetupFromStorage(){
     // Recompute legal highlights for the drawn card (don’t rely on stale UI state)
     const prev = { phase: state.phase, subphase: state.subphase, highlight: state.highlight.slice() };
     try {
-      state.phase='place'; state.subphase=null; state.highlight=[];
+      state.phase=Phase.place; state.subphase=null; state.highlight=[];
       computePlaceHighlights();
       const t = (state.highlight && state.highlight[0]) || null;
       if (!t) return false;
@@ -2564,8 +2598,8 @@ function loadSetupFromStorage(){
       }
 
       // Commit via the same rotateNew path the UI uses
-      state.phase = 'place';
-      state.subphase = 'rotateNew';
+      state.phase = Phase.place;
+      state.subphase = Subphase.rotateNew;
       state.rotateFocus = { x: t.x, y: t.y, original: 0 };
       state.previewRot  = rot;
       render(); // optional
@@ -2732,7 +2766,7 @@ function loadSetupFromStorage(){
     }
     if (hops >= state.players.length) {
       // No active players remain → game over
-      state.phase = 'gameOver';
+      state.phase = Phase.gameOver;
       // setStatus('<span style="color:#28d07a; font-weight:700;">All players have finished — game over.</span>');
       setStatus('<span class="ok">All players have finished — game over.</span>');
       updateHUD();
@@ -2747,7 +2781,7 @@ function loadSetupFromStorage(){
     P.drawLocked=false; P.drawUsed=false; P.tokenUsed=false; P.rollUsed=false;
     P.rotatedThisTurn = false;  // track meaningful board action
     state.deadFixDoneThisTurn = false;
-    state.phase='idle'; state.subphase=null; state.highlight=[]; state.hover=null; state.previewRot=0; state.die=null; state.tokenSelect=null; state.rotateFocus=null;
+    state.phase=Phase.idle; state.subphase=null; state.highlight=[]; state.hover=null; state.previewRot=0; state.die=null; state.tokenSelect=null; state.rotateFocus=null;
     // Open a short window where "force next turn" can activate
     state._enforceForcePlaceWindow = true;
     checkForcePlace();    
@@ -2781,11 +2815,11 @@ function loadSetupFromStorage(){
       return; // fix subphase renders/locks HUD
     }
     // --- Dead-Straight Fix (STRICT: trapped straight) ---
-    if (state.phase !== 'cornerFix'){ // don't collide with Corner Fix UI
+    if (state.phase !== Phase.cornerFix){ // don't collide with Corner Fix UI
       const trapped = findAllTrappedStraights();
       if (trapped.length && !state.deadFixDoneThisTurn) {
-        state.phase    = 'deadFix';
-        state.subphase = 'pickDeadStraight';
+        state.phase    = Phase.deadFix;
+        state.subphase = Subphase.pickDeadStraight;
         state.highlight = trapped;
 
         const msg = 'Dead-Straight Fix: replace ONE highlighted Straight with a Cross (free).';
@@ -2847,9 +2881,9 @@ function loadSetupFromStorage(){
       state.forcePlace ||
       (state.forceElbowFor != null && state.forceElbowFor === state.current) ||
       state.pausedForSoloAI;                   // ← NEW: don’t overwrite the solo-AI prompt
-    if (state.phase !== 'cornerFix' &&
-        state.phase !== 'deadFix'  &&
-        state.phase !== 'gameOver' &&
+    if (state.phase !== Phase.cornerFix &&
+        state.phase !== Phase.deadFix  &&
+        state.phase !== Phase.gameOver &&
         !forcedNow) {
       setStatus('Turn passed.');
     }
@@ -2871,8 +2905,8 @@ function loadSetupFromStorage(){
         const pick = aiBestPlacementForDrawn(P.id, targetsNow);
         if (pick) {
           // Commit via the same rotateNew path the UI uses
-          state.phase = 'place';
-          state.subphase = 'rotateNew';
+          state.phase = Phase.place;
+          state.subphase = Subphase.rotateNew;
           state.rotateFocus = { x: pick.x, y: pick.y, original: 0 };
           state.previewRot  = pick.rot|0;
           placeMode(); // confirm placement
@@ -2941,21 +2975,27 @@ function loadSetupFromStorage(){
     if(P.drawn){ setStatus('Already holding a card. Place or Bottom.'); return; }
     if(P.deck.draw.length===0 && P.deck.discard.length>0){ P.deck.draw=shuffle(P.deck.discard.splice(0)); }
     if(P.deck.draw.length===0){ setStatus('Deck empty.'); return; }
+
+    // TODO: Check this with AI
+    // Just draw a card. Why promote RS/RE/RT/RC cards for AI???
+    P.drawn = P.deck.draw.shift();
+
+    // TODO: Why is this code here? AI shouldn't be allowed to cheat!
     // --- AI: prefer connector cards (RS/RE/RT/RC) when available ----------
-    if (P.ai){
-      // look ahead in draw pile for a connector; if found, pull it now
-      const i = P.deck.draw.findIndex(c =>
-        c === TrackCard.RS || c === TrackCard.RE ||
-        c === TrackCard.RT || c === TrackCard.RC
-      );
-      if (i >= 0){
-        P.drawn = P.deck.draw.splice(i, 1)[0];
-      } else {
-        P.drawn = P.deck.draw.shift();
-      }
-    } else {
-      P.drawn = P.deck.draw.shift();
-    }
+    // if (P.ai){
+    //   // look ahead in draw pile for a connector; if found, pull it now
+    //   const i = P.deck.draw.findIndex(c =>
+    //     c === TrackCard.RS || c === TrackCard.RE ||
+    //     c === TrackCard.RT || c === TrackCard.RC
+    //   );
+    //   if (i >= 0){
+    //     P.drawn = P.deck.draw.splice(i, 1)[0];
+    //   } else {
+    //     P.drawn = P.deck.draw.shift();
+    //   }
+    // } else {
+    //   P.drawn = P.deck.draw.shift();
+    // }
 
     // If max-skips is forcing placement but this card cannot be placed anywhere,
     // waive the force rule now to avoid deadlocks.
@@ -3122,7 +3162,7 @@ function loadSetupFromStorage(){
   }
 
   function startCornerFixCross(ownerId){
-    state.phase = 'cornerFix';
+    state.phase = Phase.cornerFix;
     state.fixOwner  = ownerId;
     state.fixCorner = cornerFor(ownerId); // {x,y}
     state.highlight = [state.fixCorner];
@@ -3493,7 +3533,7 @@ function canPlaceElbowNow(playerId){
       ok = !!canPlaceDrawnNow(playerId);
     } else {
       const prevPhase = state.phase, prevSub = state.subphase, prevHL = state.highlight;
-      state.phase = 'place'; state.subphase = null; state.highlight = [];
+      state.phase = Phase.place; state.subphase = null; state.highlight = [];
       computePlaceHighlights();
       ok = Array.isArray(state.highlight) && state.highlight.length > 0;
       state.phase = prevPhase; state.subphase = prevSub; state.highlight = prevHL;
@@ -3518,7 +3558,7 @@ function canPlaceCardNow(playerId, cardType){
       ok = !!canPlaceDrawnNow(playerId);
     } else {
       const prevPhase = state.phase, prevSub = state.subphase, prevHL = state.highlight;
-      state.phase = 'place'; state.subphase = null; state.highlight = [];
+      state.phase = Phase.place; state.subphase = null; state.highlight = [];
       computePlaceHighlights();
       ok = Array.isArray(state.highlight) && state.highlight.length > 0;
       state.phase = prevPhase; state.subphase = prevSub; state.highlight = prevHL;
@@ -3594,7 +3634,7 @@ function checkForceElbow(P){
 
   function placeMode(){
     // --- CONFIRM (RS/RE/RT): if we are rotating an existing tile and a focus exists, commit rotation ---
-    if (state.phase === 'place' && state.subphase === 'rotateExisting' && state.rotateFocus) {
+    if (state.phase === Phase.place && state.subphase === Subphase.rotateExisting && state.rotateFocus) {
       const P = currentPlayer();
       const { x, y } = state.rotateFocus;
       const cell = state.board[y][x];
@@ -3618,7 +3658,7 @@ function checkForceElbow(P){
       state.ghostRotAnim = null;
 
       pulse(x, y);
-      state.phase = 'idle';
+      state.phase = Phase.idle;
       state.highlight = [];
       state.hover = null;
 
@@ -3631,7 +3671,7 @@ function checkForceElbow(P){
     }
 
     // --- CONFIRM: if we are in rotateNew (tap-to-rotate) and a focus exists, commit placement ---
-    if (state.phase === 'place' && state.subphase === 'rotateNew' && state.rotateFocus) {
+    if (state.phase === Phase.place && state.subphase === Subphase.rotateNew && state.rotateFocus) {
       const P = currentPlayer();
       const { x, y } = state.rotateFocus;
       const cell = state.board[y][x];
@@ -3671,7 +3711,7 @@ function checkForceElbow(P){
       state.subphase = null;
       state.rotateFocus = null;
       state.previewRot  = 0;
-      state.phase='idle';
+      state.phase=Phase.idle;
       state.highlight=[];
       state.hover=null;
 
@@ -3690,7 +3730,7 @@ function checkForceElbow(P){
       return;
     }    
     if(!P.drawn){ setStatus('Draw a card first.'); return; }
-    state.phase='place'; state.subphase=null; computePlaceHighlights(); updateHUD();
+    state.phase=Phase.place; state.subphase=null; computePlaceHighlights(); updateHUD();
     // If we're in a forced-place state but *nothing* is legal for this card,
     // waive the force so Bottom/End Turn become available.
     if (state.forcePlace && (!state.highlight || state.highlight.length===0)) {
@@ -3752,14 +3792,14 @@ function checkForceElbow(P){
     const forcedButImpossible =
       (state.forceElbowFor === P.id) && !canPlaceElbowNow(P.id);
     if (penalize && !forcedButImpossible) {
-      P.skipCount = Math.min(3, (P.skipCount|0) + 1);
+      P.skipCount = Math.min(CONSTS.SKIP_LIMIT, (P.skipCount|0) + 1);
       if (P.skipCount >= 3) {
         P.forcePlaceNext = true;   // do NOT force mid-turn; enforce next turn
        // Inform immediately that next turn will be forced
        toast('Max skips reached: forced placement next turn');        
       }      
       if (bottomed === TrackCard.Elbow) {
-        P.elbowSkipCount = Math.min(3, (P.elbowSkipCount|0) + 1);
+        P.elbowSkipCount = Math.min(CONSTS.ELBOW_SKIP_LIMIT, (P.elbowSkipCount|0) + 1);
         checkForceElbow(P);                // ← elbow-only checker
       }
     }
@@ -3772,7 +3812,7 @@ function checkForceElbow(P){
     );
    }
  
-   state.phase='idle'; state.highlight=[]; state.hover=null;
+   state.phase=Phase.idle; state.highlight=[]; state.hover=null;
    checkForcePlace();
    updateHUD(); refreshSkipTags();
    maybeAutoAdvance();
@@ -3782,7 +3822,7 @@ function checkForceElbow(P){
   function tokenMode(){
     const P=currentPlayer();
     if(P.tokenUsed){ setStatus('Token action already used this turn.'); return; }
-    state.phase = 'token'; state.subphase='select'; state.highlight=[]; state.hover=null; state.tokenSelect=null;
+    state.phase = Phase.token; state.subphase=Subphase.select; state.highlight=[]; state.hover=null; state.tokenSelect=null;
 
     const myTokens = allTokensOf(P.id);
     const options = [...myTokens];
@@ -3803,7 +3843,7 @@ function checkForceElbow(P){
       setStatus('No tokens to apply an action to. Place a token at your corner first or Draw/Place tracks.');
       toast('No tokens to act on');
       // Keep Token Action available: exit token mode without consuming the action.
-      state.phase='idle'; state.subphase=null; state.tokenSelect=null; state.highlight=[]; state.hover=null;
+      state.phase=Phase.idle; state.subphase=null; state.tokenSelect=null; state.highlight=[]; state.hover=null;
       render(); updateHUD();
       return;
     } 
@@ -3835,7 +3875,7 @@ function checkForceElbow(P){
     return d;
   }
 
-  function startRotateAnim(x,y, fromDeg, toDeg, dur=rotationDuration){
+  function startRotateAnim(x,y, fromDeg, toDeg, dur=RR_APPLY_TWEEN_MS){
     state.rotAnims.push({ x, y, from:fromDeg, to:toDeg, t0: performance.now(), dur });
     ensureAnimLoop();
   }
@@ -3968,7 +4008,7 @@ function checkForceElbow(P){
     if(x<0||y<0||x>=state.N||y>=state.N) return;
 
     // ----- Corner Fix: replace owner's corner with Cross (free) -----
-    if (state.phase === 'cornerFix'){
+    if (state.phase === Phase.cornerFix){
       const P = currentPlayer();
       const c = state.fixCorner;             // set by startCornerFixCross(ownerId)
       if (!(c && x===c.x && y===c.y)){
@@ -3980,7 +4020,7 @@ function checkForceElbow(P){
       cell.track = 'Cross';
       cell.owner = P.id;
       cell.rot   = 0;                        // Cross is symmetric
-      state.phase='idle'; state.highlight=[]; state.hover=null;
+      state.phase=Phase.idle; state.highlight=[]; state.hover=null;
       state.fixOwner=null; state.fixCorner=null;
       if (typeof onTopologyChanged === 'function') onTopologyChanged();
       render(); updateHUD(); setStatus('Corner fixed: Cross placed.');
@@ -3988,7 +4028,7 @@ function checkForceElbow(P){
     }
     
     // Dead-Straight Fix click (one free replacement per turn)
-    if (state.phase === 'deadFix' && state.subphase === 'pickDeadStraight'){
+    if (state.phase === Phase.deadFix && state.subphase === Subphase.pickDeadStraight){
       const hit = state.highlight && state.highlight.some(h => h.x===x && h.y===y);
       if (hit){
         const cell = state.board[y][x];
@@ -4003,7 +4043,7 @@ function checkForceElbow(P){
         toast('Dead-Straight fixed: placed Cross.');
 
         // Clear subphase; resume normal turn
-        state.phase = 'idle';
+        state.phase = Phase.idle;
         state.subphase = null;
         state.highlight = [];
         state.hover = null;
@@ -4026,7 +4066,7 @@ function checkForceElbow(P){
       // and execute it AFTER the tween lands on the exact 90° angle.
       if (state.ghostRotAnim) {
         const wasRotateCommit =
-          (state.subphase==='rotateExisting' &&
+          (state.subphase===Subphase.rotateExisting &&
           state.rotateFocus &&
           state.rotateFocus.x===x &&
           state.rotateFocus.y===y);
@@ -4049,7 +4089,7 @@ function checkForceElbow(P){
             state.forcePlace = false;
             state.subphase = null; state.rotateFocus = null; state.previewRot = 0;
             pulse(x,y);
-            state.phase='idle'; state.highlight=[]; state.hover=null;
+            state.phase=Phase.idle; state.highlight=[]; state.hover=null;
             onTopologyChanged();
             render(); updateHUD(); setStatus('Rotation applied.'); maybeAutoAdvance();
           } else {
@@ -4071,7 +4111,7 @@ function checkForceElbow(P){
             }
             pulse(x,y);
             state.ghostRotAnim = null;
-            state.phase='idle'; state.highlight=[]; state.hover=null;
+            state.phase=Phase.idle; state.highlight=[]; state.hover=null;
             onTopologyChanged(); updateHUD();
             setStatus('Placed. You cannot draw again this turn.');
             maybeAutoAdvance();
@@ -4081,7 +4121,7 @@ function checkForceElbow(P){
       }
 
       // RS/RE: COMMIT rotation FIRST if we're clicking the selected tile
-      if (state.subphase==='rotateExisting'
+      if (state.subphase===Subphase.rotateExisting
          && state.rotateFocus
          && state.rotateFocus.x===x
          && state.rotateFocus.y===y) {
@@ -4094,14 +4134,14 @@ function checkForceElbow(P){
         state.subphase = null; state.rotateFocus = null; state.previewRot = 0;
         pulse(x,y);
         state.ghostRotAnim = null;
-        state.phase='idle'; state.highlight=[]; state.hover=null;
+        state.phase=Phase.idle; state.highlight=[]; state.hover=null;
         onTopologyChanged();
         render(); updateHUD(); setStatus('Rotation applied.'); maybeAutoAdvance();
         return;
       }
 
       // --- NEW-PLACEMENT: COMMIT after rotation if tapping same focused cell ---
-      if (state.subphase==='rotateNew' && state.rotateFocus &&
+      if (state.subphase===Subphase.rotateNew && state.rotateFocus &&
           state.rotateFocus.x===x && state.rotateFocus.y===y) {
         const P = currentPlayer();
         const cell = state.board[y][x];
@@ -4131,7 +4171,7 @@ function checkForceElbow(P){
         state.subphase = null;
         state.rotateFocus = null;
         state.previewRot  = 0;
-        state.phase='idle';
+        state.phase=Phase.idle;
         state.highlight=[];
         state.hover=null;
 
@@ -4148,7 +4188,7 @@ function checkForceElbow(P){
       if (cell.track && (P.drawn===TrackCard.RStraight || P.drawn===TrackCard.RElbow || P.drawn===TrackCard.RT)) {
         const base = baseDrawnType(P.drawn);
         if (cell.track === base) {
-          state.subphase='rotateExisting';
+          state.subphase=Subphase.rotateExisting;
           state.rotateFocus = {x,y, original: cell.rot};
           state.previewRot  = cell.rot;
           state.hover       = {x,y};
@@ -4164,8 +4204,8 @@ function checkForceElbow(P){
       if(!legal){ toast('Not a legal cell'); return; }
 
       // If it's a legal EMPTY cell for a NEW placement, enter rotateNew subphase first
-      if (!cell.track && state.subphase !== 'rotateExisting') {
-        state.subphase    = 'rotateNew';
+      if (!cell.track && state.subphase !== Subphase.rotateExisting) {
+        state.subphase    = Subphase.rotateNew;
         state.rotateFocus = { x, y, original: 0 };
         // Start preview angle from whatever the ghost shows now
         state.previewRot  = mod360(ghostAngle() || 0);
@@ -4195,7 +4235,7 @@ function checkForceElbow(P){
         state.forcePlace = false;
 
         pulse(x,y);
-        state.phase='idle';
+        state.phase=Phase.idle;
         state.subphase=null;
         state.rotateFocus=null;
         state.previewRot=0;
@@ -4223,15 +4263,15 @@ function checkForceElbow(P){
           }
           pulse(x,y);
           state.ghostRotAnim = null;  // clear any in-progress ghost tween
-          state.phase='idle'; state.highlight=[]; state.hover=null; onTopologyChanged(); updateHUD(); setStatus('Placed. You cannot draw again this turn.');
+          state.phase=Phase.idle; state.highlight=[]; state.hover=null; onTopologyChanged(); updateHUD(); setStatus('Placed. You cannot draw again this turn.');
           maybeAutoAdvance();
           return;
     }
 
     // TOKEN phase
-    if(state.phase==='token'){
+    if(state.phase===Phase.token){
       const P=currentPlayer();
-      if(state.subphase==='select'){
+      if(state.subphase===Subphase.select){
         const isMine = state.board[y][x].token===P.id;
         if(isMine){
           const from = {x,y};
@@ -4247,12 +4287,12 @@ function checkForceElbow(P){
             const cCell  = state.board[corner.y][corner.x];
             const canPlace = countTokens(P.id) < TOKENS_MAX && cCell.track && cCell.token == null;
 
-            state.tokenSelect = null;               // remain in subphase='select'
+            state.tokenSelect = null;               // remain in subphase=Subphase.select
             state.highlight   = canPlace ? [...movable, corner] : movable;
             render();
             return;
           }          
-          state.tokenSelect = from; state.highlight = moves; state.subphase='target';
+          state.tokenSelect = from; state.highlight = moves; state.subphase=Subphase.target;
           setStatus('Token: choose a connected destination (pipes may traverse opponents).'); render(); return;
         }
         const corner = cornerFor(P.id);
@@ -4272,12 +4312,12 @@ function checkForceElbow(P){
           pushHistory('Token: place');
           cCell.token = P.id; state.players[P.id].tokens = myCount+1;
           P.tokenUsed = true; tokenTag().textContent='Token: Used'; btn('tokenBtn').disabled = true;
-          state.phase='idle'; state.subphase=null; state.highlight=[]; state.tokenSelect=null; setStatus('New token placed at your corner.'); render(); updateHUD();
+          state.phase=Phase.idle; state.subphase=null; state.highlight=[]; state.tokenSelect=null; setStatus('New token placed at your corner.'); render(); updateHUD();
           maybeAutoAdvance();
           return;
         }
         toast('Select your token to move, or your open corner to place a new one.');
-      } else if(state.subphase==='target'){
+      } else if(state.subphase===Subphase.target){
         const legal = state.highlight.some(h=>h.x===x&&h.y===y);
         if(!legal){ toast('Pick a connected destination.'); return; }
         const from = state.tokenSelect;
@@ -4313,7 +4353,7 @@ function checkForceElbow(P){
           P.tokenUsed = true;                // consume the action
           tokenTag().textContent='Token: Used';
           btn('tokenBtn').disabled = true;
-          state.phase='idle'; state.subphase=null;
+          state.phase=Phase.idle; state.subphase=null;
           state.highlight=[]; state.tokenSelect=null;
           render(); updateHUD();
           setStatus(P.name + ' completed all three corners — auto-advancing turn…');
@@ -4322,7 +4362,7 @@ function checkForceElbow(P){
         }
 
         currentPlayer().tokenUsed = true; tokenTag().textContent='Token: Used'; btn('tokenBtn').disabled = true;
-              state.phase='idle'; state.subphase=null; state.highlight=[]; state.tokenSelect=null; render(); updateHUD();
+              state.phase=Phase.idle; state.subphase=null; state.highlight=[]; state.tokenSelect=null; render(); updateHUD();
               maybeAutoAdvance();
               return;
       }
@@ -4331,7 +4371,7 @@ function checkForceElbow(P){
 
   // === ROTATE PREVIEW KEYS (anchor: RR_ROTATE_KEYS) ===
   window.addEventListener('keydown', (e)=>{
-    if (state.phase !== 'place') return;
+    if (state.phase !== Phase.place) return;
     const k = e.key.toLowerCase();
     if (k !== 'q' && k !== 'e') return;
 
@@ -4345,7 +4385,7 @@ function checkForceElbow(P){
     // Allow rotation if:
     // 1) We are actively rotating an existing tile (RS/RE after click), OR
     // 2) We are hovering an EMPTY cell (previewing a new placement)
-    if (!(state.subphase === 'rotateExisting' || hoveringEmpty)) {
+    if (!(state.subphase === Subphase.rotateExisting || hoveringEmpty)) {
       // Optional: UI nudge when RS/RE is drawn and you're over an occupied cell
       // const d = currentPlayer().drawn;
       // if (d===TrackCard.RStraight || d===TrackCard.RElbow) setStatus('Click a track to rotate');
@@ -4418,11 +4458,11 @@ function checkForceElbow(P){
   });
 
   function rotatePreview(stepDeg){
-    if (state.phase !== 'place') return;
+    if (state.phase !== Phase.place) return;
 
     // Can rotate if: rotating an existing tile OR rotating a new placement focus
-    const rotatingExisting = (state.subphase === 'rotateExisting' && state.rotateFocus);
-    const rotatingNew      = (state.subphase === 'rotateNew'      && state.rotateFocus);
+    const rotatingExisting = (state.subphase === Subphase.rotateExisting && state.rotateFocus);
+    const rotatingNew      = (state.subphase === Subphase.rotateNew      && state.rotateFocus);
 
     if (!(rotatingExisting || rotatingNew)) return;
 
@@ -4637,13 +4677,13 @@ function checkForceElbow(P){
       const b = document.getElementById('placeBtn');
       if (!b) return;
       const confirming =
-        (state.phase === 'place') &&
+        (state.phase === Phase.place) &&
         !!state.rotateFocus &&
-        (state.subphase === 'rotateNew' || state.subphase === 'rotateExisting');
+        (state.subphase === Subphase.rotateNew || state.subphase === Subphase.rotateExisting);
       b.textContent = confirming ? 'Confirm' : 'Place';
     })();
 
-    if (state.phase === 'gameOver') {
+    if (state.phase === Phase.gameOver) {
       const P = currentPlayer();
       turnTag().textContent  = 'Turn: —';
       phaseTag().textContent = 'Phase: gameOver';
@@ -4677,9 +4717,9 @@ function checkForceElbow(P){
       b.disabled = (currentPlayer()?.ai === true) || !!state.aiBusy;
     })();
 
-    if (state.phase === 'deadFix'){
+    if (state.phase === Phase.deadFix){
       const rotationsRemain = hasRotationInDeck(P);      // Keep the messaging visible while the selection is up
-      drawTag().textContent = (state.phase === 'deadFix')
+      drawTag().textContent = (state.phase === Phase.deadFix)
         ? 'Draw: Locked (Dead-Straight Fix)'
         : (P.drawUsed
             ? 'Draw: Used'
@@ -4690,7 +4730,7 @@ function checkForceElbow(P){
         const el = document.getElementById('skippedTag');
         if(!el) return;
         const skipCount = (P && P.skipCount) ? P.skipCount : 0;
-        el.textContent = 'Skipped: ' + skipCount + '/3';
+        el.textContent = 'Skipped: ' + skipCount + '/' + CONSTS.SKIP_LIMIT;
         if (skipCount >= 3) {
           el.classList.add('warn');
           el.textContent += '  ⚠ Maximum skipped';
@@ -4714,7 +4754,7 @@ function checkForceElbow(P){
       const holdingRotation = isRotationCard(P.drawn);
 
       // Tag
-      drawTag().textContent = state.phase === 'deadFix'
+      drawTag().textContent = state.phase === Phase.deadFix
         ? 'Draw: Locked (Dead-Straight Fix)'
         : (rotationsRemain ? 'Draw: Ready (Board Full: rotations available)' : 'Draw: Locked (Board Full)');
 
@@ -4778,7 +4818,7 @@ function checkForceElbow(P){
       btn('rollBtn').disabled  = !!currentPlayer().rollUsed;
       btn('applyBtn').disabled = !(state.die && state.die!=='X');
       if (elbowForceNow) {
-        setStatus('Elbows Skipped: 3/3 ⚠. This elbow must be now be placed');
+        setStatus(`Elbows Skipped: ${CONSTS.ELBOW_SKIP_LIMIT}/${CONSTS.ELBOW_SKIP_LIMIT} ⚠. This elbow must be now be placed`);
       }
       // During forced placement, Bottom must not be available if the drawn card can be placed now.
       try {
@@ -4797,7 +4837,7 @@ function checkForceElbow(P){
     }
 
     // Corner Fix HUD lock: show a RED warning and disable all actions until the free Cross is applied
-    if (state.phase === 'cornerFix'){
+    if (state.phase === Phase.cornerFix){
       // Make sure the tags reflect the current subphase
       turnTag().textContent='Turn: '+P.name+' ('+P.pocket+')';
       phaseTag().textContent='Phase: cornerFix';
@@ -4821,7 +4861,7 @@ function checkForceElbow(P){
     if (P.drawn && (P.drawn===TrackCard.Straight || P.drawn===TrackCard.Elbow ||
         P.drawn===TrackCard.Cross || P.drawn===TrackCard.RStraight ||
         P.drawn===TrackCard.RElbow || P.drawn===TrackCard.RCross)) {
-      setStatus(`Skipped: ${P.skipCount}/3`);
+      setStatus(`Skipped: ${P.skipCount}/${CONSTS.SKIP_LIMIT}`);
     }
 
     turnTag().textContent='Turn: '+P.name+' ('+P.pocket+')';
@@ -4978,7 +5018,7 @@ function checkForceElbow(P){
     const now = performance.now();
     state._frameNow = now;  // unify timing across all per-frame animations
     // grid
-    ctx.strokeStyle=COLORS.grid; ctx.lineWidth=1;
+    ctx.strokeStyle=COLORS.grid; ctx.lineWidth=CONSTS.GRID_LINE_WIDTH;
     ctx.strokeRect(0,0,size,size);
     for(let i=1;i<N;i++){ ctx.beginPath(); ctx.moveTo(i*cell,0); ctx.lineTo(i*cell,size); ctx.stroke(); ctx.beginPath(); ctx.moveTo(0,i*cell); ctx.lineTo(size,i*cell); ctx.stroke(); }
     // gears (background)
@@ -5020,10 +5060,10 @@ function checkForceElbow(P){
     // turn corner highlight
     drawTurnCornerHighlight();
     // placement highlights
-    ctx.strokeStyle=COLORS.hilite; ctx.lineWidth=3;
+    ctx.strokeStyle=COLORS.hilite; ctx.lineWidth=CONSTS.HILITE_LINE_WIDTH;
     state.highlight.forEach(p=>{ ctx.strokeRect(p.x*cell+3, p.y*cell+3, cell-6, cell-6); });
     // stronger "active" outline while rotating an existing tile with RS/RE
-    if(state.phase==='place' && state.subphase==='rotateExisting' && state.rotateFocus){
+    if(state.phase==='place' && state.subphase===Subphase.rotateExisting && state.rotateFocus){
       const rf = state.rotateFocus;
       ctx.save();
       ctx.lineWidth = 5;
@@ -5035,11 +5075,11 @@ function checkForceElbow(P){
     }    
     // ghost
     const P=currentPlayer();
-    if(state.phase==='place' && state.subphase==='rotateExisting' && state.rotateFocus) {
+    if(state.phase==='place' && state.subphase===Subphase.rotateExisting && state.rotateFocus) {
       const rf = state.rotateFocus; const c = state.board[rf.y][rf.x];
       drawTrack(c.track, ghostAngle(), rf.x, rf.y, 0.9);    
     }
-    else if (state.phase==='place' && state.subphase==='rotateNew' && state.rotateFocus) {
+    else if (state.phase==='place' && state.subphase===Subphase.rotateNew && state.rotateFocus) {
       const rf = state.rotateFocus;
       const P  = currentPlayer();
       // Draw the to-be-placed piece at the focused cell, regardless of mouse hover
@@ -5060,12 +5100,12 @@ function checkForceElbow(P){
       }
     }
     // Token ghost (during Token actions) — same visual rules
-    else if(state.phase==='token' && state.hover){
+    else if(state.phase===Phase.token && state.hover){
       const {x,y}=state.hover;
       let legal=false;
-      if(state.subphase==='target'){
+      if(state.subphase===Subphase.target){
         legal = state.highlight.some(h=>h.x===x && h.y===y);
-      }else if(state.subphase==='select'){
+      }else if(state.subphase===Subphase.select){
         const P=currentPlayer();
         const corner = cornerFor(P.id);
         const cCell  = state.board[corner.y][corner.x];
@@ -5168,7 +5208,7 @@ function checkForceElbow(P){
 
   function drawTurnCornerHighlight(){
     const P=currentPlayer();
-    if (!P.active) return; // should not happen, but guard the highlight
+    if (!P || !P.active) return; // should not happen, but guard the highlight
     const corner = cornerFor(P.id);
     const cell=state.cell;
     ctx.save();
@@ -5237,7 +5277,7 @@ function checkForceElbow(P){
 
     // If the SVG isn’t ready, keep the old fallback so nothing looks broken
     if (!gearReady || !gearImg.naturalWidth || !gearImg.naturalHeight){
-      ctx.strokeStyle = COLORS.grid; ctx.lineWidth = 2;
+      ctx.strokeStyle = COLORS.grid; ctx.lineWidth = CONSTS.GRID_HEAVY_LINE_WIDTH;
       ctx.beginPath(); ctx.arc(cx, cy, cell/2-4, 0, Math.PI*2); ctx.stroke();
       ctx.fillStyle = '#202a3d';
       ctx.beginPath(); ctx.arc(cx, cy, cell/2-7, 0, Math.PI*2); ctx.fill();

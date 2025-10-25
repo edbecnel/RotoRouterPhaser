@@ -8,6 +8,32 @@ A tactical route-building board game with optional AI players.
 
 ### What’s new
 
+### What's new (Oct 26, 2025)
+
+## 2025-10-25 — Cleanup Phase-1 (mechanical fixes)
+
+Summary: fairness + determinism + one null-guard. No UI or layout changes.
+
+## Deterministic deck recycle
+
+When the draw pile empties, the discard pile is moved back to draw without shuffling (FIFO). This preserves the original shuffle order for the entire game.
+
+## AI draw fairness
+
+Removed the legacy “prefer connector cards (RS/RE/RT/RC)” look-ahead. AI now draws exactly like humans: top of the draw pile only.
+
+## Corner-highlight guard
+
+drawTurnCornerHighlight() now skips safely if there’s no current player yet (boot/transition safety). No visual change; eliminates a rare console error.
+
+Files touched: RotoRouter.html
+
+## Sanity checks:
+
+New game → draw/discard until recycle: order remains consistent, no reshuffle.
+Early AI turns: no bias toward connectors; card mix reflects true top-of-deck.
+Launch from MainMenu: no “reading 'active' of undefined” console error on initial paint.
+
 ### What’s new (Oct 16, 2025)
 
 ## New: AI Delay Control (1–10 → ×0.5…×5.0)
