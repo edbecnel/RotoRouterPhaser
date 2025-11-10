@@ -17,6 +17,10 @@ A tactical route-building board game with optional AI players.
 - **UI:** In the **Corners** score table, hovering a player’s score shows a tooltip `Turns: ###`, and clicking the score shows a toast with the same text.
 - **Look:\*** Game tokens have new glossy 3D appearance (made from rendered PNG images encoded at base64 and embedded in the source file)
 
+### AI Only Remaining Pause
+
+- Now when there are only one or more AI players left in the game, the game pauses asking if you want to continue.
+
 ### What's new (Oct 26, 2025)
 
 ## 2025-10-25 — Cleanup Phase-1 (mechanical fixes)
@@ -104,10 +108,10 @@ You can now quickly hide all tokens to view the track layout unobstructed.
 - **No-op tolerance:** if neither a token move nor a rotation would improve connectivity (e.g., early game with no nearby networks), the AI may **Bottom and end the turn** without moving or rotating.
 - **Anti-bounce:** remembers the last hop/edge to prevent A↔B “ping-pong”.
 
-### Solo-AI pause & Continue
+### AI pause & Continue
 
-- When only **one AI player** remains and all human players are finished, the game **pauses** and shows:
-  > “There is only one AI player left. If you wish to stop now, click **New Game**, or press **Continue** to proceed.”
+- When there are **onlyy one or more AI players** remaining and all human players are finished, the game **pauses** and shows:
+  > “There is only one or more AI players left. If you wish to stop now, click **New Game**, or press **Continue** to proceed.”
 - Press **Continue** to resume AI play; the banner and button disappear.
 
 ### Forced play / HUD polish
