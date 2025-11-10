@@ -8,6 +8,15 @@ A tactical route-building board game with optional AI players.
 
 ### What’s new
 
+## What’s new (Nov 10, 2025)
+
+### Turn counter (per player)
+
+- Each player now has a **turns** counter that **increments at the start of a new turn only when there are no per-turn Redos available**. This still counts even if only one player remains. Undo/Redo do not change the count.
+- **Save/Load:** `players[].turns` is persisted in snapshots and restored on load; older saves backfill the value to `0`.
+- **UI:** In the **Corners** score table, hovering a player’s score shows a tooltip `Turns: ###`, and clicking the score shows a toast with the same text.
+- **Look:\*** Game tokens have new glossy 3D appearance (made from rendered PNG images encoded at base64 and embedded in the source file)
+
 ### What's new (Oct 26, 2025)
 
 ## 2025-10-25 — Cleanup Phase-1 (mechanical fixes)

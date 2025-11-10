@@ -108,10 +108,21 @@
       <li><b>Token Action</b> (optional): place a new token on your home corner (if there is a track on the home corner) <i>or</i> move one token along connected tracks to any reachable empty cell.</li>
       <li><b>End Turn</b>.</li>
     </ol>
+    <!-- NEW: Turn Counter (insert this block) -->
+    <h2>Turn Counter</h2>
+    <p>
+      Each player has a turn counter shown via the score cell in the <b>Corners</b> table:
+    </p>
+    <ul>
+      <li><b>When it increments:</b> at the <i>start</i> of a new turn, but only if there are <b>no per-turn Redos</b> available. This still counts even if only one player remains; Undo/Redo do not change the count. </li>
+      <li><b>Where to see it:</b> hover a player’s score to see a tooltip <code>Turns: ###</code>; click the score to show a toast with the same text. </li>
+      <li><b>Save/Load:</b> the counter is saved as <code>players[].turns</code> and restored on load (older saves default to 0). </li>
+    </ul>
     <h3>Visual Aids</h3>
     <ul>
       <li><b>Last-placed highlight:</b> on <i>your turn</i>, the most recent track you placed is outlined with a subtle glow in your color so it’s easy to find again.</li>
       <li><b>AI move preview:</b> when it’s an AI’s turn, the chosen placement/rotation cell flashes briefly before the move is committed.</li>
+      <li>Use the <b>Hide</b> button to hide/show tokens of any specific color under that player’s control during their turn…</li>
     </ul>
     <p class="tip"><i>Forced play:</i> If a forced card has <b>no legal placement</b>, the force is <b>waived</b>; you may Bottom it.</p>
     <h2>AI Players</h2>
@@ -129,9 +140,9 @@
       <li><b>AI delay:</b> slider <i>(1 → 10)</i> that scales the AI’s pauses from <b>×0.5</b> at 1 to <b>×5.0</b> at 10. Default is <b>2 (×1.0)</b>. The label shows the live multiplier; caption clarifies: <i>1 = shorter (faster), 10 = longer (slower)</i>.</li>
       <li><b>AI debug trace (console):</b> checkbox that prints the AI’s chosen move and key decision weights to the browser console.</li>
     </ul>
-    <h2>Solo-AI Pause</h2>
-    <p>When only <b>one AI player</b> remains and all human players are finished, play <b>pauses</b> and a banner appears:</p>
-    <p class="tip">“There is only one AI player left. If you wish to stop now, click <b>New&nbsp;Game</b>, or press <b>Continue</b> to proceed.”</p>
+    <h2>AI Only Pause</h2>
+    <p>When there are only <b>one or more AI players</b> remaining and all human players are finished, play <b>pauses</b> and a banner appears:</p>
+    <p class="tip">“There is only one or more AI players left. If you wish to stop now, click <b>New&nbsp;Game</b>, or press <b>Continue</b> to proceed.”</p>
     <ul>
       <li>Press <b>Continue</b> to resume AI play; the banner and button disappear.</li>
       <li>You can click <b>New&nbsp;Game</b> at any time to start fresh.</li>

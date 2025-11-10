@@ -303,7 +303,7 @@ function loadSetupFromStorage(){
     state.pausedForSoloAI = true;
     // Keep the comma attached to "New Game" and prefer non-breaking in the label
     setStatus(
-      '<span class="caution">There is only one AI player left. If you wish to stop now, click <b>New&nbsp;Game,</b> or press <b>Continue</b> to proceed.</span>'
+      '<span class="caution">There is only one or more AI players left. If you wish to stop now, click <b>New&nbsp;Game,</b> or press <b>Continue</b> to proceed.</span>'
     );
   }
   function hideSoloAIPrompt(){
@@ -342,9 +342,9 @@ function loadSetupFromStorage(){
     return {ai, human};
   }
 
-  function onlyOneAILeft(){ 
+  function onlyAILeft(){ 
     const {ai, human} = countIncomplete(); 
-    return ai===1 && human===0; 
+    return ai>0 && human===0; 
   }
 
   // Wire the Continue button (run the current AI turn once, then hide)
@@ -353,7 +353,7 @@ function loadSetupFromStorage(){
     if (!b) return;
     b.addEventListener('click', ()=>{
       hideSoloAIPrompt();
-      state.soloAIResumed = true; // ← prevent future pauses while one AI remains
+      state.onlyAIPlayersResumed = true; // ← prevent future pauses while one AI remains
       const P = currentPlayer && currentPlayer();
       if (P && P.ai && !state.aiBusy){
         if (state.aiTimer) { try{ clearTimeout(state.aiTimer);}catch(e){} state.aiTimer=null; }
@@ -1293,7 +1293,7 @@ function loadSetupFromStorage(){
     // AI turn coordination
     aiBusy:false,           // prevents re-entrancy (double actions)
     aiTimer:null,           // pending setTimeout handle for AI turn    
-    players:PLAYERS.map(p=>({...p, deck:makeDeck(), drawn:null, tokens:0, tokensRemoved:0, drawLocked:false, drawUsed:false, tokenUsed:false, rollUsed:false, skipCount: 0, elbowSkipCount: 0, forceElbow: false, active:true })),    cornerLockTurns: PLAYERS.map(()=>0),
+    players:PLAYERS.map(p=>({...p, deck:makeDeck(), drawn:null, tokens:0, tokensRemoved:0, turns: 0, drawLocked:false, drawUsed:false, tokenUsed:false, rollUsed:false, skipCount: 0, elbowSkipCount: 0, forceElbow: false, active:true })),    cornerLockTurns: PLAYERS.map(()=>0),
     current:0, phase:Phase.idle, subphase:null, highlight:[], hover:null, forcePlace:false, previewRot:0, die:null, tokenSelect:null,
     turnAdvancing:false,
     deadFixDoneThisTurn: false,
@@ -1308,7 +1308,7 @@ function loadSetupFromStorage(){
     turnHistory: [],    // Per-turn undo stack (current player's turn)
     turnRedo:   [],     // Per-turn redo stack
     pausedForSoloAI: false,
-    soloAIResumed: false, // once user clicks Continue, don’t pause again
+    onlyAIPlayersResumed: false, // once user clicks Continue, don’t pause again
     aiDebug: false,
     lastPlaced: PLAYERS.map(()=>null),    
     forceElbowFor: null,  // If set to a player id, that player must place an Elbow this turn (but only if placement is possible)
@@ -1344,46 +1344,58 @@ function loadSetupFromStorage(){
     }
     refreshLabel();
   })();
-
+  
   // ==== UNDO / REDO HELPERS ====
+
   function pushHistory(label){
     if (!UNDO_CONFIG.enabled) return;
+    const op = (label || '');
+
+    // ---- Create a single snapshot and tag it
     const snap = snapshotState();
-    snap.__turnId = state.current;      // tag snapshot with current player's turn id
-    snap.__undo_label = label || '';
-    // Global
+    snap.__turnId     = state.current;
+    snap.__undo_label = op;
+
+    // ---- Global history
     if (UNDO_CONFIG.global){
+      state.redo.length = 0;   // new action invalidates redo
       state.history.push(snap);
-      state.redo.length = 0; // new action invalidates redo
     }
-    // Turn-scoped
+
+    // ---- Turn-scoped history
     if (UNDO_CONFIG.turn){
-      state.turnHistory.push(snap);
+      if (state.turnHistory.length === 0) {
+        // ensure we have a per-turn baseline
+        state.turnHistory.push(snapshotState());
+      }
       state.turnRedo.length = 0;
+      state.turnHistory.push(snap);
     }
+
     updateUndoButtons();
   }
 
-  function applySnapshotFromHistory(snap, label, op){
-    // op is 'undo' or 'redo'
-    applySnapshot(snap, { fromHistory: true, status: label || null, op });
+  function applySnapshotFromHistory(snap, label, kind){
+    // kind is 'undo' or 'redo' (we handle move +/- in undo/redo callers)
+    applySnapshot(snap, { fromHistory: true, status: label || null, op: kind });
+    render();
+    updateHUD();
   }
 
   function updateUndoButtons(){
-    // Called inside updateHUD() as well, but safe to call anytime
     const gCanUndo = UNDO_CONFIG.enabled && UNDO_CONFIG.global && state.history.length > 0;
     const gCanRedo = UNDO_CONFIG.enabled && UNDO_CONFIG.global && state.redo.length > 0;
 
-    const tCanUndo = UNDO_CONFIG.enabled && UNDO_CONFIG.turn && state.turnHistory.length > 1; // need ≥1 action beyond baseline
-    const tCanRedo = UNDO_CONFIG.enabled && UNDO_CONFIG.turn && state.turnRedo.length > 0;
+    const tCanUndo = UNDO_CONFIG.enabled && UNDO_CONFIG.turn && state.turnHistory.length > 1; // need ≥1 beyond baseline
+    const tCanRedo = UNDO_CONFIG.enabled && UNDO_CONFIG.turn && state.turnRedo.length   > 0;
 
-    const bU = document.getElementById('undoGlobalBtn');
-    const bR = document.getElementById('redoGlobalBtn');
-    const bTU= document.getElementById('undoTurnBtn');
-    const bTR= document.getElementById('redoTurnBtn');
+    const bU  = document.getElementById('undoGlobalBtn');
+    const bR  = document.getElementById('redoGlobalBtn');
+    const bTU = document.getElementById('undoTurnBtn');
+    const bTR = document.getElementById('redoTurnBtn');
 
-    if (bU) bU.disabled  = !gCanUndo;
-    if (bR) bR.disabled  = !gCanRedo;
+    if (bU)  bU.disabled  = !gCanUndo;
+    if (bR)  bR.disabled  = !gCanRedo;
     if (bTU) bTU.disabled = !tCanUndo;
     if (bTR) bTR.disabled = !tCanRedo;
   }
@@ -1393,8 +1405,8 @@ function loadSetupFromStorage(){
     if (!UNDO_CONFIG.enabled || !UNDO_CONFIG.global) return;
     if (state.history.length === 0) return;
 
-    const cur = snapshotState();            // current state → global redo
-    const prev = state.history.pop();       // previous snapshot to apply
+    const cur  = snapshotState();      // current state → global redo
+    const prev = state.history.pop();  // previous snapshot to apply
     state.redo.push(cur);
 
     // Mirror into Turn stacks
@@ -1403,7 +1415,6 @@ function loadSetupFromStorage(){
       const stepTurnId = (prev && prev.__turnId != null) ? prev.__turnId : curTurnId;
 
       if (stepTurnId === curTurnId) {
-        // Undoing a step from THIS turn → pop one from per-turn history
         if (state.turnHistory.length > 1) {
           state.turnRedo.push(cur);
           state.turnHistory.pop();
@@ -1424,8 +1435,8 @@ function loadSetupFromStorage(){
     if (!UNDO_CONFIG.enabled || !UNDO_CONFIG.global) return;
     if (state.redo.length === 0) return;
 
-    const cur  = snapshotState();       // current state → global history
-    const next = state.redo.pop();      // snapshot to reapply
+    const cur  = snapshotState();     // current state → global history
+    const next = state.redo.pop();    // snapshot to reapply
     state.history.push(cur);
 
     // Mirror into Turn stacks
@@ -1434,11 +1445,10 @@ function loadSetupFromStorage(){
       const stepTurnId = (next && next.__turnId != null) ? next.__turnId : curTurnId;
 
       if (stepTurnId === curTurnId) {
-        // Redoing a step that belongs to THIS turn
-        state.turnHistory.push(cur);
-        if (state.turnRedo.length > 0) state.turnRedo.pop();
+        state.turnHistory.push(next);
+        state.turnRedo.length = 0;
       } else {
-        // Redoing into a different turn → keep per-turn at baseline
+        // Redoing into a different turn → reset per-turn stacks to baseline
         state.turnHistory = state.turnHistory.slice(0, 1);
         state.turnRedo.length = 0;
       }
@@ -1449,28 +1459,13 @@ function loadSetupFromStorage(){
     updateUndoButtons();
   }
 
-  // Turn-scoped Undo/Redo (only within the *current* player's turn)
+  // Per-turn Undo/Redo
   function undoTurn(){
     if (!UNDO_CONFIG.enabled || !UNDO_CONFIG.turn) return;
-    // Need at least baseline + 1 action
-    if (state.turnHistory.length <= 1) return;
-
-    // Current snapshot becomes redo entry
-    const cur = snapshotState();
-
-    // Pop the target "previous" snapshot from turnHistory and apply it
-    const prev = state.turnHistory.pop();
-
-    // Mirror the move to Global stacks so buttons/behavior stay in sync
-    if (UNDO_CONFIG.global && state.history.length > 0) {
-      // push current to global redo, drop one from global history
-      state.redo.push(cur);
-      state.history.pop();
-    }
-
-    // Turn redo receives current
+    if (state.turnHistory.length <= 1) return; // can't pop baseline
+    const cur  = snapshotState();           // current → turnRedo
+    const prev = state.turnHistory.pop();   // previous snapshot to apply
     state.turnRedo.push(cur);
-
     applySnapshotFromHistory(prev, 'Undid (Turn).', 'undo');
     toast('Undo (Turn)');
     updateUndoButtons();
@@ -1479,36 +1474,20 @@ function loadSetupFromStorage(){
   function redoTurn(){
     if (!UNDO_CONFIG.enabled || !UNDO_CONFIG.turn) return;
     if (state.turnRedo.length === 0) return;
-
-    const cur = snapshotState();
-    const next = state.turnRedo.pop();
-
-    // Mirror to Global stacks
-    if (UNDO_CONFIG.global) {
-      // current becomes a new step in global history
-      state.history.push(cur);
-      // consume one from global redo if available
-      if (state.redo.length > 0) state.redo.pop();
-    }
-
-    // Turn history receives current
+    const cur  = snapshotState();           // current → turnHistory
+    const next = state.turnRedo.pop();      // reapply
     state.turnHistory.push(cur);
-
     applySnapshotFromHistory(next, 'Redid (Turn).', 'redo');
     toast('Redo (Turn)');
     updateUndoButtons();
   }
 
-  // Reset per-turn history at the start of each player's turn.
   function resetTurnHistory(){
-    state.turnHistory = [];
-    state.turnRedo    = [];
-    // Push a baseline so "first action" undo target exists,
-    // but keep the button disabled until an action actually happens.
-    if (UNDO_CONFIG.enabled && UNDO_CONFIG.turn){
-      state.turnHistory.push(snapshotState());
-      state.turnRedo.length = 0;
-    }
+    if (!UNDO_CONFIG.enabled || !UNDO_CONFIG.turn) return;
+    state.turnHistory.length = 0;
+    state.turnRedo.length    = 0;
+    // establish a fresh baseline for this new turn
+    state.turnHistory.push(snapshotState());
     updateUndoButtons();
   }
 
@@ -1532,6 +1511,7 @@ function loadSetupFromStorage(){
       drawn: p.drawn ?? null,
       tokens: p.tokens|0,
       tokensRemoved: p.tokensRemoved|0,
+      turns: p.turns|0,
       drawLocked: !!p.drawLocked,
       drawUsed: !!p.drawUsed,
       tokenUsed: !!p.tokenUsed,
@@ -1673,13 +1653,14 @@ function loadSetupFromStorage(){
           (typeof baseP.ai === 'boolean') ? !!baseP.ai :
           !!(setupFromStorage && setupFromStorage.players && setupFromStorage.players[baseP.id] && setupFromStorage.players[baseP.id].ai),
         active: (typeof from.active === 'boolean') ? !!from.active : true,
+        turns: Number.isInteger(from.turns) ? (from.turns|0) : 0,
         deck: {
           draw: [...(from.deck?.draw || [])],
           discard: [...(from.deck?.discard || [])],
         },
         drawn: from.drawn ?? null,
-        tokens: from.tokens|0,
         tokensRemoved: from.tokensRemoved|0,
+        turns: from.turns|0,
         drawLocked: !!from.drawLocked,
         drawUsed: !!from.drawUsed,
         tokenUsed: !!from.tokenUsed,
@@ -1788,7 +1769,7 @@ function loadSetupFromStorage(){
 
     // Ensure AI hop memory is fresh after a load
     state.aiLastHop = new Map();
-    state.soloAIResumed = false;  // allow prompt again on a loaded game
+    state.onlyAIPlayersResumed = false;  // allow prompt again on a loaded game
 
     // Backfill finishOrder for legacy/partial saves: include any already-finished players
     state.finishOrder = Array.isArray(state.finishOrder)
@@ -2726,6 +2707,7 @@ function loadSetupFromStorage(){
         deck: makeDeck(state.N, activeCount),  // ← pass active count here
         drawn:null, tokens:0, tokensRemoved:0,
         drawLocked:false, drawUsed:false, tokenUsed:false, rollUsed:false,
+        turns: 0,
         skipCount: 0, elbowSkipCount: 0, forceElbow: false, forcePlaceNext: false
       };
     });    
@@ -2784,7 +2766,11 @@ function loadSetupFromStorage(){
       if (!finished && !outOfTokens) break;          // active turn found
 
       // Skip this player and try the next
-      toast(Ptest.name + (finished ? ' has finished (3/3 corners)' : ' has no tokens remaining') + ' — skipping turn.');
+      if (onlyAILeft()) {
+        // No need to display skipping turn message
+      } else {
+        toast(Ptest.name + (finished ? ' has finished (3/3 corners)' : ' has no tokens remaining') + ' — skipping turn.');
+      }
       state.current = (state.current + 1) % state.players.length;
       hops++;
     }
@@ -2798,6 +2784,16 @@ function loadSetupFromStorage(){
     }
 
     const P = currentPlayer();
+    // --- Turns counter: increment at the start of a new turn,
+    //     but only if there are NO per-turn redos available.
+    //     (Still counts even if only 1 player remains.)
+    const hasTurnRedos =
+      UNDO_CONFIG.enabled && UNDO_CONFIG.turn &&
+      Array.isArray(state.turnRedo) && state.turnRedo.length > 0;
+    if (!hasTurnRedos) {
+      P.turns = (P.turns|0) + 1;
+    }
+    
     // Reset any per-turn token masking
     state.tokensHidden = false;
     state.tokensHiddenFor = null;
@@ -2859,8 +2855,8 @@ function loadSetupFromStorage(){
     updateHUD();
 
     // === AI entry point ===
-    // If only one *unfinished* AI remains in the game, pause and ask the user.
-    if (P.ai && onlyOneAILeft() && !state.soloAIResumed){
+    // If only *unfinished* AI players remain in the game, pause and ask the user.
+    if (P.ai && onlyAILeft() && !state.onlyAIPlayersResumed){
       setAIThinking(false);
       showSoloAIPrompt();
       // Avoid updateHUD here; it can overwrite the pause message.
@@ -4640,7 +4636,16 @@ function checkForceElbow(P){
         }
       })() : '—') + (p.active ? '' : ' (inactive)');
 
-      if (sEl) sEl.textContent = p.active ? scoreStr : '—';
+      if (sEl) {
+        sEl.textContent = p.active ? scoreStr : '—';
+        sEl.title = `Turns: ${p.turns ?? 0}`;                // ⬅️ tooltip on hover
+        if (!sEl.dataset.movesBound) {                       // bind once
+          sEl.addEventListener('click', () => {
+            toast(`Turns: ${ (state.players[pid]?.turns) ?? 0 }`);
+          });
+          sEl.dataset.movesBound = '1';
+        }
+      }      
 
       if (plEl) {
         const row = byPid.get(pid);
