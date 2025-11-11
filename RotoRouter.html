@@ -300,7 +300,7 @@ async function loadExternalTokenImages(){
       if (loaded) break;
     }catch(_){ /* continue */ }
   }
-  if (!loaded && location.protocol === 'file:'){
+  if (!loaded){
     installTokenFilePickerShortcut();
   }
 }
