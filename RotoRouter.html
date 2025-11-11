@@ -282,8 +282,16 @@ function installTokenFilePickerShortcut(){
       try { await chooseAndLoadTokensFile(); } catch(e){ console.warn(e); }
     }
   });
-  if (typeof toast === 'function'){
-    toast('Tip: Press Ctrl+Alt+T to load tokens.json when running from file://', 5000);
+  const tip = 'Tip: Press Ctrl+Alt+T to load token images (tokens.json or .txt)';
+  if (typeof window.toast === 'function') {
+    window.toast(tip, 5000);
+  } else {
+    const el = document.getElementById('toast');
+    if (el) {
+      el.textContent = tip;
+      el.classList.add('show');
+      setTimeout(()=>el.classList.remove('show'), 5000);
+    }
   }
 }
 
@@ -339,6 +347,7 @@ function loadSetupFromStorage(){
     if(_toastTimer) clearTimeout(_toastTimer);
     _toastTimer=setTimeout(()=>el.classList.remove('show'), ms);
   };
+  window.toast = toast;
   // AI timing (base ms). sleep(...) scales by state.aiDelayScale (UI dropdown/slider).
   const aiSleepTime = 200;
   const aiSleepTime2 = 300;
