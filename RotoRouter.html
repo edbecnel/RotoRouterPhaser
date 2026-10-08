@@ -22,6 +22,19 @@
     .small { font-size: 12px; }
     .legend { display: grid; grid-template-columns: auto 1fr; gap: 6px 10px; align-items: center; }
     .dot { width: 12px; height: 12px; border-radius: 50%; display: inline-block; border: 1px solid #fff4; }
+    /* Current player turn indicator (larger than standings .dot) */
+    .turnDot {
+      width: 18px;
+      height: 18px;
+      border-radius: 50%;
+      border: 2.5px solid #fff;
+      box-sizing: border-box;
+      flex-shrink: 0;
+      display: none;
+      vertical-align: middle;
+    }
+    .turnDot.show { display: inline-block; }
+    .turnStatusRow { align-items: center; gap: 8px; flex-wrap: wrap; }
     .inactiveRow { opacity: .4; filter: grayscale(.2); }
     /* Prevent standings entries from breaking across lines */
     .standLine { white-space: nowrap; }
@@ -61,7 +74,11 @@
     <aside class="sidebar">
       <h1>RotoRouter</h1>
       <div class="panel">
-        <div class="row"><span class="tag" id="turnTag">Turn: —</span><span class="tag" id="phaseTag">Phase: —</span></div>
+        <div class="row turnStatusRow">
+          <span class="tag" id="turnTag">Turn: —</span>
+          <span class="tag" id="phaseTag">Phase: —</span>
+          <span class="turnDot" id="turnColorDot" title="Current turn" aria-hidden="true"></span>
+        </div>
         <div class="row small muted" id="status">New Game → Draw → Place. First placement is your corner.</div>
       </div>
       <h2>Standings</h2>
@@ -373,6 +390,24 @@ function loadSetupFromStorage(){
   function clamp(n,min,max){ return n<min?min:n>max?max:n; }  
   const turnTag=()=>tag('turnTag');
   const phaseTag=()=>tag('phaseTag');
+
+  function updateTurnColorDot(){
+    const el = document.getElementById('turnColorDot');
+    if (!el) return;
+    if (state.phase === Phase.gameOver) {
+      el.classList.remove('show');
+      el.style.background = '';
+      return;
+    }
+    const P = currentPlayer();
+    if (!P || P.active === false) {
+      el.classList.remove('show');
+      el.style.background = '';
+      return;
+    }
+    el.classList.add('show');
+    el.style.background = P.color;
+  }
   const drawnTag=()=>tag('drawnCard');
   const drawTag=()=>tag('drawTag');
   const dieTag=()=>tag('dieFace');
@@ -519,6 +554,7 @@ function loadSetupFromStorage(){
       const base = `Turn: ${cur.name}${cur.ai ? ' (AI)' : ''}`;
       t.textContent = on && isAI ? base.replace(' (AI)', ' (AI thinking…)') : base;
     }
+    updateTurnColorDot();
   }
 
   // Keyboard guard so humans can't accidentally fire shortcuts during an AI turn
@@ -697,36 +733,37 @@ function loadSetupFromStorage(){
   }
 
   // Rich scorer for rotating an existing tile (RS/RE/RT).
-  function aiScoreRotationAt(x, y, rot, pid){
+  function aiScoreRotationAt(x, y, rot, pid, trackTypeOverride){
     const cell = state.board[y][x];
     if(!cell || !cell.track || cell.track==='Block') return -Infinity;
+    const type = trackTypeOverride || cell.track;
 
     // Primary: reciprocal connections (degree)
     let degree = 0;
-    const opens = rotatedOpeningsType(cell.track, rot);
+    const opens = rotatedOpeningsType(type, rot);
     for (const [dx,dy] of opens){
       const nx = x+dx, ny = y+dy;
       if (!within(nx,ny)) continue;
       const n = state.board[ny][nx];
       if (!n || !n.track || n.track==='Block') continue;
-      if (hasReciprocalTypes(cell.track, rot, n.track, n.rot, dx, dy)) degree++;
+      if (hasReciprocalTypes(type, rot, n.track, n.rot, dx, dy)) degree++;
     }
 
     // Off-board openings are bad (harder near corners).
-    const offboard   = aiCountOffboardOpenings(cell.track, rot, x, y);
+    const offboard   = aiCountOffboardOpenings(type, rot, x, y);
     const firstPlace = false; // not a new placement; use the lighter penalty
     const offPenalty = firstPlace ? (offboard * 60) : (offboard * 25);
 
     // Inward-friendly empty neighbors
-    const inward = aiCountInwardOpenings(cell.track, rot, x, y);
+    const inward = aiCountInwardOpenings(type, rot, x, y);
 
     // Outward vs. retreat relative to the owner's corner & the board center
-    const owner = state.board[y][x].owner ?? pid; // prefer tile owner; fall back to acting player
-    const outwardBias = aiOutwardBias(cell.track, rot, owner, x, y);
-    const retreatPen  = aiBackTowardCornerPenalty(cell.track, rot, owner, x, y);
+    const owner = trackTypeOverride ? pid : (state.board[y][x].owner ?? pid);
+    const outwardBias = aiOutwardBias(type, rot, owner, x, y);
+    const retreatPen  = aiBackTowardCornerPenalty(type, rot, owner, x, y);
 
     // Path-to-opponent-corner bonus if this rotation helps create a path
-    const pathBonus = aiHasPathToOppCornerWithHypothetical(cell.track, rot, x, y, owner) ? 50 : 0;
+    const pathBonus = aiHasPathToOppCornerWithHypothetical(type, rot, x, y, owner) ? 50 : 0;
 
     return (degree * 12)
         + pathBonus
@@ -738,21 +775,24 @@ function loadSetupFromStorage(){
 
   // For RS/RE/RT on an existing tile: prefer rotations that strictly improve score.
   // If no rotation improves (or all zero-offboard options are worse), recommend "no-op".
-  function aiBestRotationFor(x, y, pid){
+  function aiBestRotationFor(x, y, pid, trackTypeOverride){
     const cell = state.board[y][x];
     if(!cell || !cell.track || cell.track==='Block'){
       return { rot: snap90(cell?.rot ?? 0), score: -Infinity, curScore: -Infinity, improve: -Infinity };
     }
-    const baseRot   = snap90(cell.rot);
-    const curScore  = aiScoreRotationAt(x, y, baseRot, pid);
+    const evalType  = trackTypeOverride || cell.track;
+    const baseRot   = trackTypeOverride ? 0 : snap90(cell.rot);
+    const curScore  = trackTypeOverride
+      ? aiScoreRotationAt(x, y, snap90(cell.rot), pid)
+      : aiScoreRotationAt(x, y, baseRot, pid);
 
     // If any zero-offboard rotation exists, don't consider offboard ones at all.
-    const hasZeroOff = [0,90,180,270].some(r => aiCountOffboardOpenings(cell.track, r, x, y) === 0);
-    const candidates = [0,90,180,270].filter(r => !hasZeroOff || aiCountOffboardOpenings(cell.track, r, x, y) === 0);
+    const hasZeroOff = [0,90,180,270].some(r => aiCountOffboardOpenings(evalType, r, x, y) === 0);
+    const candidates = [0,90,180,270].filter(r => !hasZeroOff || aiCountOffboardOpenings(evalType, r, x, y) === 0);
 
     let best = { rot: baseRot, score: curScore, curScore, improve: 0 };
     for (const r of candidates){
-      const sc = aiScoreRotationAt(x, y, r, pid);
+      const sc = aiScoreRotationAt(x, y, r, pid, trackTypeOverride);
       if (sc > best.score) best = { rot: r, score: sc, curScore, improve: sc - curScore };
     }
     return best;
@@ -2373,6 +2413,19 @@ function loadSetupFromStorage(){
               }
             }
 
+            // --- A2) Best token-connected replace (different track type → baseType)
+            let bestReplacePick = null;
+            for (const t of targets){
+              const cell = state.board[t.y][t.x];
+              if (!cell || !cell.track) continue;
+              if (cell.track === baseType) continue;
+              if (!isTrackConnectedToPlayerToken(P.id, t.x, t.y)) continue;
+              const br = aiBestRotationFor(t.x, t.y, P.id, baseType);
+              if (!bestReplacePick || br.improve > bestReplacePick.improve) {
+                bestReplacePick = { ...br, x:t.x, y:t.y, replacing: true };
+              }
+            }
+
             // --- B) Best new placement (as baseType) using the existing placement scorer
             const bestPlace = aiBestPlacementForDrawn(P.id, targets); // understands RS/RE/RT -> baseType
 
@@ -2394,6 +2447,14 @@ function loadSetupFromStorage(){
                 ? (!placeOK || bestRotPick.score >= bestPlace.score)              // normal comparison later in game
                 : (placeOK ? (bestRotPick.score >= bestPlace.score + 8) : true)   // stricter in the opening
               );
+            const repOK =
+              bestReplacePick &&
+              bestReplacePick.improve >= MIN_IMPROVE &&
+              (
+                netSize >= EARLY_NET_MIN
+                ? (!placeOK || bestReplacePick.score >= bestPlace.score)
+                : (placeOK ? (bestReplacePick.score >= bestPlace.score + 8) : true)
+              );
 
             if (rotOK){
               if (state.aiDebug) console.log('[AI] rotate-existing chosen', bestRotPick);
@@ -2408,8 +2469,25 @@ function loadSetupFromStorage(){
               aiFlashPick(bestRotPick.x, bestRotPick.y, P.color);
               await sleep(aiSleepTime3);
               await animatePreviewRotation(bestRotPick.rot);
-              // Confirm rotation directly instead of re-entering placement mode
-              applyRotation();
+              placeMode();
+              await sleep(aiSleepTime);
+            } else if (repOK){
+              if (state.aiDebug) console.log('[AI] replace-existing chosen', bestReplacePick);
+              state.forcePlace = false;
+              placeMode();
+              state.phase=Phase.place; state.subphase=Subphase.rotateExisting;
+              state.rotateFocus = {
+                x: bestReplacePick.x, y: bestReplacePick.y,
+                original: state.board[bestReplacePick.y][bestReplacePick.x].rot,
+                replacing: true,
+              };
+              state.previewRot = 0;
+              render();
+              await sleep(aiSleepTime);
+              aiFlashPick(bestReplacePick.x, bestReplacePick.y, P.color);
+              await sleep(aiSleepTime3);
+              await animatePreviewRotation(bestReplacePick.rot);
+              placeMode();
               await sleep(aiSleepTime);
             } else if (placeOK){
               if (state.aiDebug) console.log('[AI] place (RS/RE/RT) chosen', bestPlace);
@@ -3414,6 +3492,79 @@ function loadSetupFromStorage(){
     return false;
   }
 
+  // True if (x,y) is a track cell in the connected network of any of pid's on-board tokens.
+  function isTrackConnectedToPlayerToken(pid, x, y){
+    const cell = state.board[y]?.[x];
+    if (!cell || !cell.track || cell.track === 'Block') return false;
+    for (const t of allTokensOf(pid)){
+      for (const p of connectedTrackFrom(t.x, t.y)){
+        if (p.x === x && p.y === y) return true;
+      }
+    }
+    return false;
+  }
+
+  // RS/RE/RT occupied-cell target: same base type (rotate) or token-connected (replace).
+  function isRotationCardOccupiedTarget(pid, drawn, x, y){
+    if (drawn !== TrackCard.RStraight && drawn !== TrackCard.RElbow && drawn !== TrackCard.RT) return false;
+    const cell = state.board[y]?.[x];
+    if (!cell || !cell.track || cell.track === 'Block') return false;
+    const base = baseDrawnType(drawn);
+    if (cell.track === base) return true;
+    return isTrackConnectedToPlayerToken(pid, x, y);
+  }
+
+  // RC occupied-cell target: existing Cross, or any track token-connected to pid.
+  function isRCrossOccupiedTarget(pid, x, y){
+    const cell = state.board[y]?.[x];
+    if (!cell || !cell.track || cell.track === 'Block') return false;
+    if (cell.track === TrackCard.Cross) return true;
+    return isTrackConnectedToPlayerToken(pid, x, y);
+  }
+
+  function commitRotationCardAction(x, y){
+    const P = currentPlayer();
+    const cell = state.board[y][x];
+    const rf = state.rotateFocus;
+    const toRot = snap90(state.previewRot ?? cell.rot);
+    const base = baseDrawnType(P.drawn);
+    const replacing = !!(rf && rf.replacing);
+
+    pushHistory(replacing ? 'Replace track (RS/RE/RT)' : 'Rotation (RS/RE/RT) Confirm');
+    if (replacing) {
+      cell.track = base;
+      cell.rot = toRot;
+      cell.owner = P.id;
+      state.lastPlaced = Array.isArray(state.lastPlaced) ? state.lastPlaced : [];
+      state.lastPlaced[P.id] = { x, y, rot: cell.rot|0, track: cell.track };
+    } else {
+      cell.rot = toRot;
+    }
+
+    P.deck.discard.push(P.drawn);
+    P.drawn = null;
+    P.skipCount = 0;
+    state.forcePlace = false;
+
+    state.subphase = null;
+    state.rotateFocus = null;
+    state.previewRot = 0;
+    state.ghostRotAnim = null;
+
+    pulse(x, y);
+    state.phase = Phase.idle;
+    state.highlight = [];
+    state.hover = null;
+
+    if (typeof onTopologyChanged === 'function') onTopologyChanged();
+    render();
+    updateHUD();
+    setStatus(replacing
+      ? ('Replaced with ' + base + '. You cannot draw again this turn.')
+      : 'Rotation applied.');
+    maybeAutoAdvance();
+  }
+
   // For the current player's *drawn* card, does (x,y) have ANY rotation that
   // both reciprocally connects to neighbors AND gives degree>0?
   // Allow an exception only if this is the very first placement at the player’s corner.
@@ -3490,21 +3641,20 @@ function computePlaceHighlights(){
   if (D===TrackCard.RStraight || D===TrackCard.RElbow || D===TrackCard.RT){
     for(let yy=0; yy<state.N; yy++){
       for(let xx=0; xx<state.N; xx++){
-        const c = state.board[yy][xx];
-        if(c.track===base && c.track!=='Block'){
+        if (isRotationCardOccupiedTarget(pid, D, xx, yy)) {
           adj.set(xx+','+yy, {x:xx,y:yy});
         }
       }
     }
   }
 
-  // RC (Replaceable Cross): any existing track is a valid target
+  // RC (Replaceable Cross): Cross tiles, or any track connected to one of pid's tokens
   if (D===TrackCard.RCross){
     for(let yy=0; yy<state.N; yy++){
       for(let xx=0; xx<state.N; xx++){
-        const c = state.board[yy][xx];
-        //if(c.track==='Cross'){ adj.set(xx+','+yy, {x:xx,y:yy}); }
-        if(c.track){ adj.set(xx+','+yy, {x:xx,y:yy}); }
+        if (isRCrossOccupiedTarget(pid, xx, yy)) {
+          adj.set(xx+','+yy, {x:xx,y:yy});
+        }
       }
     }
     // Also allow RC to be PLACED on your own empty corner (not just replace)
@@ -3590,8 +3740,10 @@ function computePlaceHighlights(){
       // Always allow occupied targets when holding RS/RE/RT or RC (rotate/replace).
       if (cell.track){
         const d = P.drawn;
-        if (d===TrackCard.RStraight || d===TrackCard.RElbow || d===TrackCard.RT) return true;
-        if (d===TrackCard.RCross) return true;
+        if (d===TrackCard.RStraight || d===TrackCard.RElbow || d===TrackCard.RT) {
+          return isRotationCardOccupiedTarget(P.id, d, x, y);
+        }
+        if (d===TrackCard.RCross) return isRCrossOccupiedTarget(P.id, x, y);
         // If we’re holding a normal track but clicked an occupied cell,
         // this wasn’t meant to be shown anyway; fall through to false.
         return false;
@@ -3738,40 +3890,10 @@ function checkForceElbow(P){
 }
 
   function placeMode(){
-    // --- CONFIRM (RS/RE/RT): if we are rotating an existing tile and a focus exists, commit rotation ---
+    // --- CONFIRM (RS/RE/RT): rotate in place or replace on token-connected tile ---
     if (state.phase === Phase.place && state.subphase === Subphase.rotateExisting && state.rotateFocus) {
-      const P = currentPlayer();
       const { x, y } = state.rotateFocus;
-      const cell = state.board[y][x];
-
-      // Commit the preview orientation (snap to 0/90/180/270)
-      const toRot = snap90(state.previewRot ?? cell.rot);
-
-      pushHistory('Rotation (RS/RE/RT) Confirm');
-      cell.rot = toRot;
-
-      // Discard the RS/RE/RT card and clear force/skip counters appropriately
-      P.deck.discard.push(P.drawn);
-      P.drawn = null;
-      P.skipCount = 0;
-      state.forcePlace = false;
-
-      // Reset subphase & UI
-      state.subphase   = null;
-      state.rotateFocus = null;
-      state.previewRot = 0;
-      state.ghostRotAnim = null;
-
-      pulse(x, y);
-      state.phase = Phase.idle;
-      state.highlight = [];
-      state.hover = null;
-
-      if (typeof onTopologyChanged === 'function') onTopologyChanged();
-      render();
-      updateHUD();
-      setStatus('Rotation applied.');
-      maybeAutoAdvance();
+      commitRotationCardAction(x, y);
       return;
     }
 
@@ -4186,17 +4308,7 @@ function checkForceElbow(P){
 
           // Re-enter the same logic paths below, but without the early return.
           if (wasRotateCommit) {
-            // === RS/RE rotateExisting COMMIT (same as original commit block) ===
-            const toRot = state.previewRot;
-            cell.rot = toRot;
-            P.deck.discard.push(P.drawn); P.drawn = null;
-            P.skipCount = 0;
-            state.forcePlace = false;
-            state.subphase = null; state.rotateFocus = null; state.previewRot = 0;
-            pulse(x,y);
-            state.phase=Phase.idle; state.highlight=[]; state.hover=null;
-            onTopologyChanged();
-            render(); updateHUD(); setStatus('Rotation applied.'); maybeAutoAdvance();
+            commitRotationCardAction(x, y);
           } else {
             // === Normal placement path (same as original “place track” block) ===
             if (cell.track){ toast('Cell occupied'); return; }
@@ -4230,18 +4342,7 @@ function checkForceElbow(P){
          && state.rotateFocus
          && state.rotateFocus.x===x
          && state.rotateFocus.y===y) {
-        // Commit the preview orientation (no re-animate; user already saw the ghost at final angle)
-        const toRot   = snap90(state.previewRot ?? cell.rot);
-        cell.rot = toRot;
-        P.deck.discard.push(P.drawn); P.drawn = null;
-        P.skipCount = 0;
-        state.forcePlace = false;     // placing satisfies the force rule
-        state.subphase = null; state.rotateFocus = null; state.previewRot = 0;
-        pulse(x,y);
-        state.ghostRotAnim = null;
-        state.phase=Phase.idle; state.highlight=[]; state.hover=null;
-        onTopologyChanged();
-        render(); updateHUD(); setStatus('Rotation applied.'); maybeAutoAdvance();
+        commitRotationCardAction(x, y);
         return;
       }
 
@@ -4288,8 +4389,7 @@ function checkForceElbow(P){
         return;
       }
 
-      // === RS/RE: ENTER rotateExisting BEFORE legal-cell gating ===
-      // Allow rotating ANY existing tile of the same base type (even on first turn).
+      // === RS/RE/RT: ENTER rotate/replace on occupied targets BEFORE legal-cell gating ===
       if (cell.track && (P.drawn===TrackCard.RStraight || P.drawn===TrackCard.RElbow || P.drawn===TrackCard.RT)) {
         const base = baseDrawnType(P.drawn);
         if (cell.track === base) {
@@ -4297,8 +4397,18 @@ function checkForceElbow(P){
           state.rotateFocus = {x,y, original: cell.rot};
           state.previewRot  = cell.rot;
           state.hover       = {x,y};
-          state.highlight   = [{x,y}];   // show selection
+          state.highlight   = [{x,y}];
           setStatus('Rotating ' + base + ': use ⟲/⟳ or Q/E to rotate; click again or press “Confirm” to apply.');
+          render(); updateHUD();
+          return;
+        }
+        if (isTrackConnectedToPlayerToken(P.id, x, y)) {
+          state.subphase=Subphase.rotateExisting;
+          state.rotateFocus = {x,y, original: cell.rot, replacing: true};
+          state.previewRot  = 0;
+          state.hover       = {x,y};
+          state.highlight   = [{x,y}];
+          setStatus('Replacing with ' + base + ': use ⟲/⟳ or Q/E to orient; click again or press “Confirm” to apply.');
           render(); updateHUD();
           return;
         }
@@ -4811,6 +4921,7 @@ function checkForceElbow(P){
         .forEach(id => { const b = document.getElementById(id); if (b) b.disabled = true; });
       renderCornerScoreTable();
       renderStandingsTop();
+      updateTurnColorDot();
       render();
       updateUndoButtons();
       return;
@@ -4945,6 +5056,7 @@ function checkForceElbow(P){
         }
       } catch {}            
 
+      updateTurnColorDot();
       render();
       updateUndoButtons();
       return;
@@ -4966,6 +5078,7 @@ function checkForceElbow(P){
       endTurnBtn.disabled = true;
       overrideBtn.style.display = 'none';
 
+      updateTurnColorDot();
       render();
       updateUndoButtons();
 
@@ -5117,6 +5230,7 @@ function checkForceElbow(P){
       const list = (reached && reached.size) ? Array.from(reached).map(n=>n[0]).join(', ') : '';
       el.textContent = 'Score: ' + (reached ? reached.size : 0) + '/3' + (list?(' ['+list+']'):'');
     })();
+    updateTurnColorDot();
     render();
     // Ensure standings reflect per-player scores & correct ordinals
     renderStandingsAccurate();
@@ -5190,8 +5304,9 @@ function checkForceElbow(P){
     // ghost
     const P=currentPlayer();
     if(state.phase==='place' && state.subphase===Subphase.rotateExisting && state.rotateFocus) {
-      const rf = state.rotateFocus; const c = state.board[rf.y][rf.x];
-      drawTrack(c.track, ghostAngle(), rf.x, rf.y, 0.9);    
+      const rf = state.rotateFocus;
+      const ghostType = rf.replacing ? baseDrawnType(P.drawn) : state.board[rf.y][rf.x].track;
+      drawTrack(ghostType, ghostAngle(), rf.x, rf.y, 0.9);
     }
     else if (state.phase==='place' && state.subphase===Subphase.rotateNew && state.rotateFocus) {
       const rf = state.rotateFocus;

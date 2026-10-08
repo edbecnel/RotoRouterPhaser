@@ -72,26 +72,49 @@
     </ul>
 
     <h2>The Deck — Rotation &amp; Replacement (Dual-Use)</h2>
-    <p>These cards can <b>act on existing tiles</b> <i>or</i> be <b>used to place new tracks</b> just like their normal counterparts.</p>
+    <p>Cards <b>RS</b>, <b>RE</b>, <b>RT</b>, and <b>RC</b> each have a <b>base track</b> (Straight, Elbow, T, or Cross). On your turn you may either <b>use them on an existing tile</b> (rotate or replace — see below) <i>or</i> <b>place that base track</b> into a legal <b>empty</b> cell, same rules as a normal track card.</p>
     <ul>
-      <li><b>RS</b> — rotate an existing <b>Straight</b> <i>or</i> place a new <b>Straight</b></li>
-      <li><b>RE</b> — rotate an existing <b>Elbow</b> <i>or</i> place a new <b>Elbow</b></li>
-      <li><b>RT</b> — rotate an existing <b>T</b> <i>or</i> place a new <b>T</b></li>
-      <li><b>RC</b> — replace <i>any</i> existing tile with a <b>Cross</b> <i>or</i> place a new <b>Cross</b></li>
+      <li><b>RS</b> — base track: <b>Straight</b></li>
+      <li><b>RE</b> — base track: <b>Elbow</b></li>
+      <li><b>RT</b> — base track: <b>T</b></li>
+      <li><b>RC</b> — base track: <b>Cross</b></li>
     </ul>
 
-    <p><b>Deck scaling:</b> With 2–3 active players, your personal deck grows so total track supply stays healthy.
-    The game also enforces per-player minimums (7×7: 7/6/3/1; 9×9: 9/8/3/1 for Straight/Elbow/T/Cross).
-    Rotation cards (<b>RS/RE/RT/RC</b>) scale too. Decks are built at <b>New Game</b> from the chosen board size and active player count.</p>
-
     <p><b>Deck scaling:</b> With 2–3 active players, your personal deck grows so total track supply stays healthy. The game also enforces per-player minimums (7×7: 7/6/3/1; 9×9: 9/8/3/1 for Straight/Elbow/T/Cross). Rotation cards (<b>RS/RE/RT/RC</b>) scale too. Decks are built at <b>New Game</b> from the chosen board size and active player count.</p>
+
+    <h3>Token-connected tiles</h3>
+    <p>A track cell is <b>token-connected</b> for you when it is part of the same <b>connected pipe network</b> as at least one of <b>your tokens</b> on the board — i.e. you can reach that cell from your token by following adjacent tracks with <b>matching, reciprocal openings</b> (the same connectivity used for token movement along pipes).</p>
+    <p class="tip"><i>Example:</i> Your token sits on a <b>T</b> whose opening faces a neighbor <b>Elbow</b>; if those sides connect, that Elbow is token-connected and may be a target for <b>RT</b> (replace with T) or <b>RC</b> (replace with Cross), among other legal plays.</p>
+
+    <h3>RS / RE / RT — occupied cells</h3>
+    <p>After you draw, cyan outlines show every legal target. On a cell that <b>already has a track</b>:</p>
+    <ul>
+      <li><b>Same base type</b> (e.g. <b>RT</b> on an existing <b>T</b>): <b>rotate</b> that tile in place. Use <b>Q/E</b> or ⟲/⟳, then click the tile again or press <b>Confirm</b>. The track <b>type and color stay the same</b>; only rotation changes.</li>
+      <li><b>Different type, but token-connected</b> (e.g. <b>RT</b> on an opponent’s <b>Elbow</b> your token can reach): <b>replace</b> the tile with your card’s base type (<b>T</b> for RT). Orient with Q/E or ⟲/⟳, then confirm. The new track uses <b>your color</b>. Any token on that cell <b>stays</b>.</li>
+    </ul>
+    <p>Matching-type tiles may be rotated <b>anywhere on the board</b> (not only next to your network). Cross-type <b>replacement</b> on token-connected cells is only allowed when the new type comes from your RS/RE/RT card.</p>
+
+    <h3>RC — occupied cells</h3>
+    <ul>
+      <li><b>Existing Cross:</b> you may use <b>RC</b> on that cell (replace with Cross per RC rules).</li>
+      <li><b>Any other track type</b> that is <b>token-connected</b>: replace it with a <b>Cross</b>. The Cross <b>keeps the replaced tile’s color</b>. Tokens on the cell remain.</li>
+    </ul>
+    <p>RC does <b>not</b> apply to arbitrary distant tiles that are not Crosses and not token-connected.</p>
+
+    <h3>RS / RE / RT / RC — empty cells</h3>
+    <ul>
+      <li>Play the card as a <b>new</b> Straight, Elbow, T, or Cross using the normal <b>empty-cell placement</b> rules (adjacency, attachment, and opponent-connection rules below).</li>
+      <li><b>RC only:</b> you may also place a new Cross on your <b>empty home corner</b>, or on an empty cell <b>orthogonally adjacent to your home corner</b> when your corner already has a track (even if you do not own that corner track).</li>
+    </ul>
 
     <p class="tip"><i>Tip:</i> While a placement “ghost” is shown, use <b>Q</b>/<b>E</b> to rotate before confirming.</p>
 
     <h3>Track colors</h3>
     <ul>
-      <li>Newly placed tracks adopt the <b>placing player’s color</b>.</li>
-      <li><b>RC on an existing tile</b>: the Cross <b>keeps the replaced tile’s color</b>. (RC into an empty cell uses the placing player’s color.)</li>
+      <li>New tracks placed in <b>empty</b> cells adopt the <b>placing player’s color</b>.</li>
+      <li><b>RS/RE/RT — rotate same type:</b> color unchanged.</li>
+      <li><b>RS/RE/RT — replace on a token-connected tile:</b> the new track uses <b>your color</b>.</li>
+      <li><b>RC on an existing tile:</b> the Cross <b>keeps the replaced tile’s color</b>. (RC into an empty cell uses the placing player’s color.)</li>
     </ul>
 
     <h2>Turn Flow</h2>
@@ -100,8 +123,9 @@
       <li><b>Play</b>:
         <ul>
           <li>Place a track (Straight/Elbow/T/Cross) in a legal empty cell, <i>or</i></li>
-          <li>Use <b>RS/RE/RT</b> to rotate a matching placed tile, <i>or</i> use <b>RC</b> to replace any tile with a Cross, <i>or</i></li>
-          <li>(Dual-use) play RS/RE/RT/RC as their <b>normal track</b> in an empty cell.</li>
+          <li>Use <b>RS/RE/RT</b> on an occupied cell: <b>rotate</b> a matching tile, or <b>replace</b> a <b>token-connected</b> tile with your card’s base track, <i>or</i></li>
+          <li>Use <b>RC</b> on an occupied <b>Cross</b> or any <b>token-connected</b> tile to replace it with a <b>Cross</b>, <i>or</i></li>
+          <li>(Dual-use) play RS/RE/RT/RC as their <b>normal track</b> in a legal empty cell (RC has extra corner adjacency options — see above).</li>
           <li><b>Touch rotation mode:</b> Tap a legal empty cell once to enter <i>rotation mode</i> — the ghost stays visible. Use the ⟲ / ⟳ buttons (or Q/E) to rotate, then tap again or press <b>Confirm</b> to place.</li>
         </ul>
       </li>
@@ -120,7 +144,9 @@
     </ul>
     <h2>Visual Aids</h2>
     <ul>
-      <li><b>Last-placed highlight:</b> on <i>your turn</i>, the most recent track you placed is outlined with a subtle glow in your color so it’s easy to find again.</li>
+      <li><b>Turn indicator:</b> next to Turn / Phase, a <b>larger</b> color dot (white outline, filled with the active player’s color) shows whose turn it is.</li>
+      <li><b>Last-placed highlight:</b> on <i>your turn</i>, the most recent track you placed or replaced is outlined with a glow in your color so it’s easy to find again.</li>
+      <li><b>Home corner:</b> on your turn, your home corner cell has a steady border in your color.</li>
       <li><b>AI move preview:</b> when it’s an AI’s turn, the chosen placement/rotation cell flashes briefly before the move is committed.</li>
       <li>Use the <b>Hide</b> button to hide/show tokens of any specific color under that player’s control during their turn…</li>
     </ul>
@@ -170,11 +196,12 @@ Opponents may place adjacent to your tracks only if their new tile connects to y
       <li>Tracks connect via continuous chains of matching exits.</li>
       <li>Highlights show legal empty cells adjacent to your network.</li>
     </ul>
-    <h3>Rotation / replacement</h3>
+    <h3>Rotation / replacement (summary)</h3>
     <ul>
-      <li><b>RS/RE/RT</b>: click matching tile → rotate with <b>Q/E</b> → click to confirm.</li>
-      <li><b>RC</b>: click any tile to make it a <b>Cross</b> (rotate before confirming if desired).</li>
-      <li>(Dual-use) You may also play these as new tracks of their base type.</li>
+      <li>Legal targets for RS/RE/RT/RC are shown with <b>cyan outlines</b> after you click <b>Place</b> (or enter place mode with a card drawn).</li>
+      <li><b>RS/RE/RT:</b> occupied <b>matching</b> tile → rotate; occupied <b>token-connected</b> tile of another type → replace with base track; empty cell → place base track (normal rules).</li>
+      <li><b>RC:</b> occupied <b>Cross</b> or <b>token-connected</b> tile → replace with Cross (keeps replaced color); empty cell → place Cross (normal rules plus RC corner cases).</li>
+      <li>Click the highlighted cell, use <b>Q/E</b> or ⟲/⟳ to orient when prompted, then click again or press <b>Confirm</b>.</li>
     </ul>
     <p class="tip"><i>Tip:</i> On tablets or touchscreens, use the <b>⟲ CCW</b> and <b>⟳ CW</b> buttons on the sidebar to rotate when a track is in rotation mode. Press <b>Confirm</b> (formerly “Place”) or tap the same cell again to commit.</p>
 
