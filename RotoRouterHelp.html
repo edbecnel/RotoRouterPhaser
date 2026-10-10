@@ -228,11 +228,17 @@ Opponents may place adjacent to your tracks only if their new tile connects to y
 
     <h2>Tokens &amp; Scoring</h2>
     <ul>
-      <li><b>Place</b> a token on your home corner if a track is present on that corner.</li>
+      <li><b>Place</b> a token on your home corner if a track is present on that corner and the cell is empty.</li>
       <li><b>Move</b> a token along connected paths to any reachable empty cell (one move per turn).</li>
-      <li><b>Score</b> by ending on an opponent’s corner; remove the moving token from the board.</li>
+      <li><b>Score</b> by ending on an opponent’s corner; the scoring token is removed from the board (it does not stay on that corner).</li>
       <li>On <b>3/3</b>, your turn ends immediately; you’re auto-skipped thereafter.</li>
       <li><b>Pass-through corners:</b> tokens may <b>pass through</b> corners they have already scored, but may <b>not stop</b> on them again.</li>
+    </ul>
+    <h3>Token movement &amp; corners</h3>
+    <ul>
+      <li>Tokens generally <b>cannot pass through</b> other tokens. If you would be trapped by opponents’ tokens, you may pass through <i>opponent</i> tokens (never your own) only to find legal destinations; you still cannot <b>end</b> on an occupied non-corner cell.</li>
+      <li><b>Corners can’t be blocked:</b> you may move onto an opponent’s home corner to score even if that player’s token is parked there.</li>
+      <li><b>Home-corner knock-off:</b> when an opponent scores on your home corner while <b>your</b> token is on that cell, your token is <b>removed from the board</b>. This does <b>not</b> increase your lifetime removed-token count (you are not “out” a token permanently). On <b>any later turn</b> (not necessarily your next one), you may use <b>Token Action</b> to <b>place</b> that token again on your home corner when the corner has a track and is empty and you still have a token slot available.</li>
     </ul>
 
     <h2>Hide/Unhide Tokens</h2>

@@ -2143,6 +2143,40 @@ function loadSetupFromStorage(){
     updatePlacesFromFinishOrder(); // keep the table immediately in sync
   }
 
+  function scoreStatusMessage(moverName, oppName, knockedOffOwner, ai){
+    const prefix = ai ? moverName + ' (AI) scored at ' : moverName + ' scored at ';
+    let msg = prefix + oppName + "'s corner!";
+    if (knockedOffOwner) msg += ' ' + oppName + "'s home token was removed.";
+    return msg;
+  }
+
+  // Scoring move onto an opponent's home corner (mover removed from play; optional owner knock-off).
+  function resolveTokenScore(moverPid, from, toX, toY){
+    if (from && within(from.x, from.y) && state.board[from.y][from.x].token === moverPid) {
+      state.board[from.y][from.x].token = null;
+    }
+    const oppId = opponentCornerAt(toX, toY, moverPid);
+    if (oppId == null) return { scored: false };
+
+    const P = state.players[moverPid];
+    const destCell = state.board[toY][toX];
+    const knockedOffOwner = destCell.token === oppId;
+
+    if (!P.reached) P.reached = new Set();
+    const oppName = PLAYERS[oppId].name;
+    P.reached.add(oppName);
+    recordFinishIfNew(P);
+
+    if (destCell.token === moverPid) destCell.token = null;
+    if (knockedOffOwner) {
+      destCell.token = null;
+      state.players[oppId].tokens = countTokens(oppId);
+    }
+
+    P.tokensRemoved = Math.min(TOKENS_MAX, (P.tokensRemoved|0) + 1);
+    return { scored: true, oppId, oppName, knockedOffOwner };
+  }
+
   // BFS for token moves — by default do NOT pass through any tokens.
   // If no destinations exist under that rule, do a fallback BFS that allows
   // pass-through over *opponent* tokens (never over your own). Corners can’t
@@ -2577,20 +2611,10 @@ function loadSetupFromStorage(){
             const moves = reachableFrom(action.from, P.id);
             state.highlight = moves;
             // Emulate click on target branch
-            const oppId = opponentCornerAt(action.to.x, action.to.y, P.id);
             pushHistory('Token: move');
-            // clear source
-            state.board[action.from.y][action.from.x].token = null;
-            if (oppId != null){
-              if (!P.reached) P.reached = new Set();
-              const oppName = PLAYERS[oppId].name;
-              P.reached.add(oppName);
-              recordFinishIfNew(P); // <-- pass the scoring PLAYER, not the opponent's name
-              if (state.board[action.to.y][action.to.x].token === P.id) {
-                state.board[action.to.y][action.to.x].token = null;
-              }
-              P.tokensRemoved = Math.min(TOKENS_MAX, (P.tokensRemoved|0) + 1);
-              setStatus(P.name + ' (AI) scored at ' + oppName + "'s corner!");
+            const scoreRes = resolveTokenScore(P.id, action.from, action.to.x, action.to.y);
+            if (scoreRes.scored) {
+              setStatus(scoreStatusMessage(P.name, scoreRes.oppName, scoreRes.knockedOffOwner, true));
             } else {
               state.board[action.to.y][action.to.x].token = P.id;
               setStatus('AI moved a token.');
@@ -2636,16 +2660,11 @@ function loadSetupFromStorage(){
                 }
               } else if (again.type === 'move') {
                 pushHistory('Token: move');
-                state.board[again.from.y][again.from.x].token = null;
-
-                const oppId = opponentCornerAt(again.to.x, again.to.y, P.id);
-                if (oppId != null) {
-                  currentPlayer().reached ||= new Set();
-                  currentPlayer().reached.add(PLAYERS[oppId].name);
-                  recordFinishIfNew(currentPlayer());
-                  currentPlayer().tokensRemoved = Math.min(TOKENS_MAX, (currentPlayer().tokensRemoved|0) + 1);
-                } else {
+                const scoreRes = resolveTokenScore(P.id, again.from, again.to.x, again.to.y);
+                if (!scoreRes.scored) {
                   state.board[again.to.y][again.to.x].token = P.id;
+                } else {
+                  setStatus(scoreStatusMessage(P.name, scoreRes.oppName, scoreRes.knockedOffOwner, true));
                 }
                 currentPlayer().tokenUsed = true;
               }
@@ -2689,15 +2708,11 @@ function loadSetupFromStorage(){
                 if (again.type === 'move') {
                   P._failedRotationTurns = 0;
                   pushHistory('Token: move');
-                  state.board[again.from.y][again.from.x].token = null;
-                  const oppId = opponentCornerAt(again.to.x, again.to.y, P.id);
-                  if (oppId != null) {
-                    currentPlayer().reached ||= new Set();
-                    currentPlayer().reached.add(PLAYERS[oppId].name);
-                    recordFinishIfNew(currentPlayer());
-                    currentPlayer().tokensRemoved = Math.min(TOKENS_MAX, (currentPlayer().tokensRemoved|0)+1);
-                  } else {
+                  const scoreRes = resolveTokenScore(P.id, again.from, again.to.x, again.to.y);
+                  if (!scoreRes.scored) {
                     state.board[again.to.y][again.to.x].token = P.id;
+                  } else {
+                    setStatus(scoreStatusMessage(P.name, scoreRes.oppName, scoreRes.knockedOffOwner, true));
                   }
                   currentPlayer().tokenUsed = true;
                   if (!state.aiVisitedThisTurn) state.aiVisitedThisTurn = new Set();
@@ -4536,29 +4551,11 @@ function checkForceElbow(P){
         const legal = state.highlight.some(h=>h.x===x&&h.y===y);
         if(!legal){ toast('Pick a connected destination.'); return; }
         const from = state.tokenSelect;
-        // Move / Score handling (fix: always remove moving token on scoring; never leave extra token on board)
         pushHistory('Token: move');
-        // 1) Clear the moving token from its source cell (always)
-        if (from && within(from.x, from.y) && state.board[from.y][from.x].token === P.id) {
-          state.board[from.y][from.x].token = null;
-        }
-        const oppId = opponentCornerAt(x, y, P.id);
-        const destHasOwner = (oppId != null && state.board[y][x].token === oppId);
-        if (oppId != null) {
-          // 2) Reached an opponent's corner → record score
-          if (!P.reached) P.reached = new Set();
-          const oppName = PLAYERS[oppId].name;
-          P.reached.add(oppName);
-          recordFinishIfNew(P);
-          // 3) Do NOT leave our token on the destination (corner stays with its owner’s token if present)
-          if (state.board[y][x].token === P.id) {
-            state.board[y][x].token = null;
-          }
-          // 4) Count this token as removed from play
-          P.tokensRemoved = Math.min(TOKENS_MAX, (P.tokensRemoved|0) + 1);
-          setStatus(P.name + ' scored at ' + oppName + "'s corner!");
+        const scoreRes = resolveTokenScore(P.id, from, x, y);
+        if (scoreRes.scored) {
+          setStatus(scoreStatusMessage(P.name, scoreRes.oppName, scoreRes.knockedOffOwner, false));
         } else {
-          // Normal move to a non-scoring cell → place our token there
           state.board[y][x].token = P.id;
           setStatus('Token moved.');
         }

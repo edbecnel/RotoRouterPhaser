@@ -113,6 +113,7 @@ _Tip:_ while a placement “ghost” is shown, use **Q/E** to rotate before conf
 - **Place** a token: onto your **home corner** if a track is present on that corner.
 - **Move** a token: along connected paths to any reachable empty cell (one move per turn).
 - **Score**: end a move on an **opponent’s corner** → score that corner; the moving token is **removed from the board**.
+- **Home-corner knock-off:** if your token is parked on your **home corner** when an opponent scores there, your token is **removed from the board** (this does **not** count toward your lifetime removed tokens). You may **place** that token again on a later turn via normal home-corner placement.
 - **Finish**: upon **3/3** scored corners, your turn ends immediately and you are auto-skipped thereafter.
 - **Pass-through corners:** tokens may pass through corners they have already scored, but they may not stop on those corners again.
 

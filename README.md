@@ -467,6 +467,7 @@ The sidebar now includes a dedicated **Corners Score Table**:
 - Tokens **cannot pass through any other tokens** by default.
 - If a player’s token would otherwise be **trapped by opponents’ tokens**, movement may **pass through opponent tokens** (never through your own) solely to find legal destinations. You still **cannot end** on an occupied non-corner cell.
 - **Corners can’t be blocked:** you may **move onto an opponent’s corner** even if their token already occupies that corner; that move **scores** and resolves per normal rules.
+- **Home-corner knock-off:** when a score lands on an opponent’s home corner while **their** token is parked there, that owner’s token is **removed** from the board (not counted as a lifetime removed token). They may **re-place** it on any later turn at home corner when eligible.
 
 ---
 
@@ -584,6 +585,7 @@ If you Bottom it, your Draw state is set to **Used** — you must wait for your 
 - When a token **scores** (lands on an opponent’s corner), the mover’s token is:
   - **Always removed** from its **source** cell, and
   - **Never left** on the destination corner.
+- If the corner owner had their token **parked on their home corner**, that token is **cleared** from the cell (owner `tokensRemoved` unchanged); they may re-place via normal corner placement later.
 - Fixes the case where **Score = 1/3** but **3 tokens** still appeared on the board.
 
 ### 26) Legacy/Undo safety: prevent over-placement, but show the truth
@@ -802,7 +804,7 @@ Each history snapshot carries a `__turnId` so global operations can stay in sync
 - `reachableFrom()` runs in **two phases**:
   1. **Strict:** treats **any token** as a blocker (no pass-through).
   2. **Fallback (only if trapped):** allows pass-through over **opponent tokens** (never your own) to find destinations. You still can’t end on an occupied non-corner cell.
-- **Corner exception**: If a neighbor is an opponent’s **own corner** and their token is on it, it remains a **legal terminal** (corners can’t be blocked) but we **don’t traverse beyond** it.
+- **Corner exception**: If a neighbor is an opponent’s **own corner** and their token is on it, it remains a **legal terminal** (corners can’t be blocked) but we **don’t traverse beyond** it. On score, `resolveTokenScore()` may **knock off** the owner’s parked home token without incrementing their `tokensRemoved`.
 
 ### No-legal-placement bottoming (no penalty)
 
